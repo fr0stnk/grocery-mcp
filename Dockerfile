@@ -20,9 +20,9 @@ CMD ["node", "dist/index.js"]
 FROM base AS shufersal
 COPY upstream/shufersal-cart/package*.json ./
 RUN npm ci --omit=dev && npm cache clean --force
-COPY upstream/shufersal-cart/LICENSE upstream/shufersal-cart/tsconfig.json ./
-COPY upstream/shufersal-cart/bin ./bin
-COPY upstream/shufersal-cart/src ./src
+COPY --chown=node:node upstream/shufersal-cart/LICENSE upstream/shufersal-cart/tsconfig.json ./
+COPY --chown=node:node upstream/shufersal-cart/bin ./bin
+COPY --chown=node:node upstream/shufersal-cart/src ./src
 ENV SHUFERSAL_COOKIE_FILE=/data/cookies.json \
     SHUFERSAL_CHOICES_FILE=/data/choices.json
 USER node
