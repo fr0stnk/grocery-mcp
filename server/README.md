@@ -179,7 +179,9 @@ With Docker, run `docker compose run --rm -T grocery` from the repository root. 
 ## Tests
 
 ```sh
-npm test
+npm test           # all tests
+npm run coverage   # with coverage thresholds: 95% lines, 80% branches, 85% functions
+npm run lint       # ESLint
 ```
 
 The tests use stand-in adapters from `test/fixtures/`, so they need no credentials or network access:
@@ -187,6 +189,7 @@ The tests use stand-in adapters from `test/fixtures/`, so they need no credentia
 - `normalize.test.js` covers size, price, barcode and promotion parsing, both stores' result shapes, weighed items, error reporting, sorting and barcode grouping. The cases come from live search results.
 - `http.test.js` runs the server in HTTP mode with stdin closed. It also checks catalog search against a local stand-in for the catalog API, including the store and User-Agent sent and the barcode pairing. It covers listing tools and annotations, search, two clients sharing one store process, 404, 405, 400 and a foreign `Host` header, and read-only mode.
 - `basket.test.js` covers the cache (TTL, stale fallback, merged loads), the concurrency limiter, match selection, promotion pricing, basket totals and a failing store.
+- `http-server.test.js` and `rami-catalog.test.js` test the HTTP listener and the catalog client in process, including error paths such as challenge pages, HTTP errors, refused connections and timeouts.
 - `server.test.js` starts real child processes. It covers startup failure messages, restart after an adapter exits, partial results when one store fails or hangs, tool forwarding and prefixes, instruction pass-through, and exit when stdin closes.
 
 ## Files

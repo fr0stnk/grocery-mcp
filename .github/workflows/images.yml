@@ -34,7 +34,12 @@ permissions:
 
 jobs:
   test:
+    name: Lint and test
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+        working-directory: server
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -43,9 +48,18 @@ jobs:
           cache: npm
           cache-dependency-path: server/package-lock.json
       - run: npm ci
-        working-directory: server
-      - run: npm test
-        working-directory: server
+      - run: npm run lint
+      - name: Test with coverage thresholds
+        run: npm run coverage 2>&1 | tee coverage.txt
+      - name: Coverage summary
+        if: always()
+        run: |
+          {
+            echo '### Test coverage'
+            echo '```'
+            sed -n '/start of coverage report/,/end of coverage report/p' coverage.txt | sed 's/^# //'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
   image:
     needs: test

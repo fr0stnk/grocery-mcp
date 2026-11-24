@@ -23,7 +23,7 @@ export async function fetchRamiCatalog(query, { url = DEFAULT_URL, store = '412'
       signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (error) {
-    throw new StoreError(`rami-levy: catalog request failed: ${error.cause?.code ?? error.message}`);
+    throw new StoreError(`rami-levy: catalog request failed: ${networkReason(error)}`);
   }
   const text = await response.text();
   let data;
@@ -34,4 +34,11 @@ export async function fetchRamiCatalog(query, { url = DEFAULT_URL, store = '412'
   }
   if (!response.ok) throw new StoreError(`rami-levy: catalog returned HTTP ${response.status}`);
   return data;
+}
+
+/** fetch hides the network cause, sometimes inside an AggregateError (one per address tried). */
+function networkReason(error) {
+  if (error.name === 'TimeoutError') return 'timed out';
+  const cause = error.cause;
+  return cause?.code ?? cause?.errors?.find((e) => e.code)?.code ?? cause?.message ?? error.message;
 }
