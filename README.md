@@ -133,6 +133,18 @@ Pushes to `main` publish the images as `ghcr.io/fr0stnk/grocery-mcp-<image>`, ta
 
 The compose files use these images by default. `GROCERY_IMAGE_TAG` pins a tag, for example `sha-1a2b3c4`. `GROCERY_IMAGE_PREFIX` points to another registry or to local names.
 
+### Releases
+
+Pushing a version tag publishes a release:
+
+```sh
+git tag -a v0.1.0 -m "v0.1.0" && git push origin v0.1.0
+```
+
+[`release.yml`](.github/workflows/release.yml) creates a GitHub release with notes generated from the commits. The image workflow publishes the same version, for example `0.1.0`, for every image. To pin a server to it, set `GROCERY_IMAGE_TAG=0.1.0` in its `.env`.
+
+CodeQL default setup scans the JavaScript, Python and workflow code on each push. Its results are under the repository's Security tab.
+
 To update a server:
 
 ```sh

@@ -1,0 +1,21 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create the GitHub release with generated notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes \
+            --title "$TAG" \
+            --notes "Images: \`ghcr.io/${GITHUB_REPOSITORY_OWNER}/grocery-mcp-<grocery|rami-levy|shufersal|tunnel>:${TAG#v}\` for linux/amd64 and linux/arm64. Pin them with \`GROCERY_IMAGE_TAG=${TAG#v}\`."
