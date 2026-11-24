@@ -10,6 +10,11 @@ x-tunnel-client: &tunnel-client
   depends_on: [grocery-http]
   network_mode: host
   command: ["run", "--config", "/config/tunnel.yaml"]
+  # After a reboot, Docker may start the tunnel before grocery-http is
+  # listening. Without a startup wait, tunnel-client marks its startup catalog
+  # as failed and disables polling until it is restarted by hand.
+  environment:
+    - MCP_STARTUP_WAIT_TIMEOUT=180s
   read_only: true
   cap_drop: [ALL]
   security_opt: ["no-new-privileges:true"]

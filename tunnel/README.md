@@ -89,4 +89,5 @@ That account then adds the plugin as in step 5, with its own tunnel ID. Both acc
 - To use the tools read-only, set `GROCERY_READ_ONLY=1` in `.env` and recreate `grocery-http`. Write tools are then hidden and refused.
 - To revoke access, delete the key or the tunnel on platform.openai.com, or stop the `tunnel` service.
 - The tunnel limits each request to 120 seconds and 10 MiB.
+- After a reboot, each tunnel waits up to 180 seconds (`MCP_STARTUP_WAIT_TIMEOUT`) for `grocery-http` to start listening. Without that wait, `tunnel-client` reports `startup catalog failed; control-plane polling disabled` and stays offline until restarted. If it does, run `curl http://127.0.0.1:8792/readyz` to see the state, then restart the tunnel.
 - `grocery-http` and the on-demand `grocery` service share the same data volumes. Avoid running cart changes through both at the same moment.
