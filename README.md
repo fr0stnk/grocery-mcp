@@ -145,7 +145,53 @@ git tag -a v0.1.0 -m "v0.1.0" && git push origin v0.1.0
 
 CodeQL default setup scans the JavaScript, Python and workflow code on each push. Its results are under the repository's Security tab.
 
-To update a server:
+### Automatic deployment
+
+[`deploy.yml`](.github/workflows/deploy.yml) deploys a release to one server after that release's images are published. You can also start it from **Actions → Deploy → Run workflow**, optionally with a tag. It deploys the latest release by default. A deploy works like this:
+
+1. The runner joins your Tailscale network for the length of the job, using a `tag:ci` identity. No port is opened to the internet.
+2. It connects over SSH with a deploy key that the server only accepts for running [`scripts/deploy_receiver.py`](scripts/deploy_receiver.py) (`restrict,command=…`). The server's host key is pinned.
+3. It sends one JSON request on stdin with the release tag and the credentials from the GitHub environment **production**.
+4. The receiver checks the request and backs up the files it will change. It writes `.env` and the tunnel files, checks out the tag, and pulls that version's images. It then restarts `grocery-http` and the tunnels and waits until each reports ready. If anything fails, it restores the backups and the previous commit.
+
+The environment only accepts workflows from `main`, and its secrets are never given to pull requests from forks. Empty secrets leave the server's existing values unchanged.
+
+**One-time setup:**
+
+1. Update the server's checkout so it contains `scripts/deploy_receiver.py`. Then run this from your computer:
+
+   ```sh
+   python3 scripts/setup_deploy.py --host <ssh-host> --deploy-host <server-tailnet-ip>
+   ```
+
+   It creates the environment and installs the restricted deploy key, storing its private half as a secret. It records the server's address and host key, and copies the server's current credentials into secrets and variables. No value is printed.
+2. In the Tailscale admin console, allow `tag:ci` to reach only the server's SSH port. Add these entries to the access-control policy, merged into your existing policy:
+
+   ```json
+   "tagOwners": { "tag:ci": ["autogroup:admin"] },
+   "acls": [ { "action": "accept", "src": ["tag:ci"], "dst": ["<server-tailnet-ip>:22"] } ]
+   ```
+
+3. Under **Settings → OAuth clients**, create a client with the **Auth Keys: Write** scope for `tag:ci`. Store it as two secrets; `gh` prompts for each value with hidden input:
+
+   ```sh
+   gh secret set TS_OAUTH_CLIENT_ID --env production
+   gh secret set TS_OAUTH_SECRET --env production
+   ```
+
+| In `production` | Kind | Holds |
+|---|---|---|
+| `TS_OAUTH_CLIENT_ID`, `TS_OAUTH_SECRET` | secrets | The Tailscale OAuth client |
+| `DEPLOY_SSH_KEY` | secret | The restricted deploy key |
+| `DEPLOY_SSH_HOST`, `DEPLOY_SSH_USER`, `DEPLOY_SSH_KNOWN_HOSTS` | variables | The server's tailnet address, user and pinned host key |
+| `SHUFERSAL_USERNAME`, `SHUFERSAL_PASSWORD`, `RAMI_LEVY_BEARER_TOKEN`, `RAMI_LEVY_ECOM_TOKEN`, `RAMI_LEVY_USER_AGENT`, `RAMI_LEVY_COOKIE` | secrets | Store credentials |
+| `RAMI_LEVY_STORE`, `GROCERY_STORES`, `GROCERY_READ_ONLY` | variables | Non-secret settings |
+| `OPENAI_TUNNEL_KEY`, `OPENAI_TUNNEL_EXTRA_KEY` | secrets | Tunnel runtime keys |
+| `OPENAI_TUNNEL_ID`, `OPENAI_TUNNEL_EXTRA_ID` | variables | Tunnel IDs |
+
+Once deployment is set up, the GitHub environment is the source of truth for credentials. Change them there and run the Deploy workflow, or a deploy will overwrite what you edited on the server. For Rami Levy tokens, `python3 scripts/set_rami_levy_tokens.py --github` does both.
+
+To update a server by hand:
 
 ```sh
 git pull --ff-only && git submodule update --init --recursive

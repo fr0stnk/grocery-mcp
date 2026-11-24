@@ -1,0 +1,98 @@
+name: Deploy
+
+# Deploys a release to the server after its images are published, or on demand.
+# The runner joins the tailnet briefly and sends one JSON request over SSH to
+# scripts/deploy_receiver.py, the only command the deploy key may run.
+on:
+  workflow_run:
+    workflows: ["Test and publish images"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Release tag to deploy, for example v0.1.0. Empty means the latest release."
+        required: false
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    # workflow_run fires for every images run; deploy only successful release-tag runs.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' &&
+       startsWith(github.event.workflow_run.head_branch, 'v'))
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Choose the release
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_REF: ${{ inputs.ref }}
+          RUN_REF: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          ref="${INPUT_REF:-$RUN_REF}"
+          if [ -z "$ref" ]; then
+            ref=$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)
+          fi
+          if [[ ! "$ref" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+            echo "::error::Not a release tag: $ref"
+            exit 1
+          fi
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+          echo "### Deploying $ref" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Join the tailnet
+        uses: tailscale/github-action@v3
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+
+      - name: Deploy over SSH
+        env:
+          REF: ${{ steps.release.outputs.ref }}
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ vars.DEPLOY_SSH_KNOWN_HOSTS }}
+          SSH_TARGET: ${{ vars.DEPLOY_SSH_USER }}@${{ vars.DEPLOY_SSH_HOST }}
+          SHUFERSAL_USERNAME: ${{ secrets.SHUFERSAL_USERNAME }}
+          SHUFERSAL_PASSWORD: ${{ secrets.SHUFERSAL_PASSWORD }}
+          RAMI_LEVY_BEARER_TOKEN: ${{ secrets.RAMI_LEVY_BEARER_TOKEN }}
+          RAMI_LEVY_ECOM_TOKEN: ${{ secrets.RAMI_LEVY_ECOM_TOKEN }}
+          RAMI_LEVY_USER_AGENT: ${{ secrets.RAMI_LEVY_USER_AGENT }}
+          RAMI_LEVY_COOKIE: ${{ secrets.RAMI_LEVY_COOKIE }}
+          RAMI_LEVY_STORE: ${{ vars.RAMI_LEVY_STORE }}
+          GROCERY_STORES: ${{ vars.GROCERY_STORES }}
+          GROCERY_READ_ONLY: ${{ vars.GROCERY_READ_ONLY }}
+          TUNNEL_MAIN_ID: ${{ vars.OPENAI_TUNNEL_ID }}
+          TUNNEL_MAIN_KEY: ${{ secrets.OPENAI_TUNNEL_KEY }}
+          TUNNEL_EXTRA_ID: ${{ vars.OPENAI_TUNNEL_EXTRA_ID }}
+          TUNNEL_EXTRA_KEY: ${{ secrets.OPENAI_TUNNEL_EXTRA_KEY }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          python3 - <<'PY' | ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes -o ConnectTimeout=30 "$SSH_TARGET"
+          import json, os
+          keys = ["SHUFERSAL_USERNAME", "SHUFERSAL_PASSWORD", "RAMI_LEVY_BEARER_TOKEN", "RAMI_LEVY_ECOM_TOKEN",
+                  "RAMI_LEVY_USER_AGENT", "RAMI_LEVY_COOKIE", "RAMI_LEVY_STORE", "GROCERY_STORES", "GROCERY_READ_ONLY"]
+          tunnels = {}
+          for name in ("main", "extra"):
+              tunnel_id = os.environ.get(f"TUNNEL_{name.upper()}_ID", "")
+              key = os.environ.get(f"TUNNEL_{name.upper()}_KEY", "")
+              if tunnel_id:
+                  tunnels[name] = {"id": tunnel_id, **({"key": key} if key else {})}
+          print(json.dumps({"ref": os.environ["REF"], "env": {k: os.environ[k] for k in keys if os.environ.get(k)}, "tunnels": tunnels}))
+          PY
+
+      - name: Remove the deploy key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key

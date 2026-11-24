@@ -7,6 +7,7 @@
 3. Run one of:
      python3 scripts/set_rami_levy_tokens.py                    # this checkout's .env
      python3 scripts/set_rami_levy_tokens.py --host my-server   # ~/grocery-mcp/.env over SSH
+     python3 scripts/set_rami_levy_tokens.py --github           # GitHub secrets, then the Deploy workflow
 
 The script reads the clipboard, checks the tokens, and writes
 RAMI_LEVY_BEARER_TOKEN, RAMI_LEVY_ECOM_TOKEN and RAMI_LEVY_USER_AGENT. It also
@@ -142,12 +143,29 @@ def clipboard_tools():
     return None, None
 
 
+def save_to_github(values, environment, deploy=True):
+    """Stores values as environment secrets via gh on stdin, then optionally starts the Deploy workflow."""
+    for name, value in values.items():
+        done = subprocess.run(["gh", "secret", "set", name, "--env", environment], input=value, text=True, capture_output=True)
+        if done.returncode:
+            sys.exit(f"Storing {name} in GitHub failed: {done.stderr.strip()}")
+    print(f"Saved {', '.join(values)} as secrets in the GitHub environment {environment}.")
+    if deploy:
+        done = subprocess.run(["gh", "workflow", "run", "deploy.yml"], text=True, capture_output=True)
+        if done.returncode:
+            sys.exit(f"Starting the Deploy workflow failed: {done.stderr.strip()}")
+        print("Started the Deploy workflow to apply them on the server.")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--host", help="SSH host whose .env to update, for example a Raspberry Pi")
     ap.add_argument("--remote-env", default="~/grocery-mcp/.env", help="the .env path on --host (default: %(default)s)")
     ap.add_argument("--env-file", default=str(REPO_ENV), help="local .env to update when --host is not given (default: this checkout)")
     ap.add_argument("--from-file", metavar="PATH", help="read the cURL from PATH, or from stdin with -, instead of the clipboard")
+    ap.add_argument("--github", nargs="?", const="production", metavar="ENVIRONMENT",
+                    help="store the values as secrets in this GitHub environment (default: production) and start the Deploy workflow")
+    ap.add_argument("--no-deploy", action="store_true", help="with --github, only store the secrets")
     ap.add_argument("--dry-run", action="store_true", help="check the cURL only; write nothing and keep the clipboard")
     opts = ap.parse_args()
 
@@ -171,7 +189,9 @@ def main():
         print("Dry run: nothing written.")
         return
 
-    if opts.host:
+    if opts.github:
+        save_to_github(values, opts.github, deploy=not opts.no_deploy)
+    elif opts.host:
         code = inspect.getsource(update_env_file) + (
             "\nimport json, sys\nprint(update_env_file(sys.argv[1], json.load(sys.stdin)))\n"
         )
