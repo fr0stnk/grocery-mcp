@@ -81,6 +81,9 @@ test('HTTP mode rejects other paths, methods and Host headers', async () => {
   const base = new URL(url);
   assert.equal((await fetch(new URL('/health', base))).status, 200);
   assert.equal((await fetch(new URL('/other', base), { method: 'POST' })).status, 404);
+  const discovery = await fetch(new URL('/.well-known/oauth-protected-resource', base));
+  assert.equal(discovery.status, 404);
+  assert.match(discovery.headers.get('content-type'), /^text\/plain/, 'a JSON 404 would read as broken OAuth metadata');
   assert.equal((await fetch(url)).status, 405);
   const bad = await fetch(url, { method: 'POST', body: '{not json', headers: { 'content-type': 'application/json' } });
   assert.equal(bad.status, 400);

@@ -41,7 +41,13 @@ export function startHttpServer({ host, port, path = '/mcp', makeServer, log = (
   const httpServer = http.createServer(async (req, res) => {
     const { pathname } = new URL(req.url ?? '/', 'http://local');
     if (pathname === '/health' && req.method === 'GET') return send(res, 200, { ok: true });
-    if (pathname !== path) return send(res, 404, { error: 'not found' });
+    if (pathname !== path) {
+      // Plain text, not JSON: OAuth discovery clients such as OpenAI's
+      // tunnel-client parse a JSON 404 from /.well-known/... as broken
+      // metadata and then refuse the server.
+      res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
+      return res.end('Not Found');
+    }
     if (req.method !== 'POST') {
       return send(res, 405, { jsonrpc: '2.0', error: { code: -32000, message: 'Method not allowed' }, id: null }, { allow: 'POST' });
     }

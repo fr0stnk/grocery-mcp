@@ -75,7 +75,7 @@ Calls are passed through as they are, with a 110-second timeout, which fits with
 With `GROCERY_HTTP=127.0.0.1:8791`, the server listens at `http://127.0.0.1:8791/mcp`:
 
 - It is stateless. Each `POST /mcp` gets a fresh MCP server and transport, and returns a JSON response. All requests share the same long-running store processes, so stores start once, not once per client.
-- `GET /health` returns `{"ok":true}`. Other paths return 404, and other methods on `/mcp` return 405. Bodies are limited to 4 MiB.
+- `GET /health` returns `{"ok":true}`. Other paths return a plain-text 404, and other methods on `/mcp` return 405. The 404 is plain text because OpenAI's tunnel-client probes the `/.well-known/oauth-*` paths and tried to read a JSON 404 as OAuth metadata. Bodies are limited to 4 MiB.
 - On a loopback address, requests whose `Host` header names another host are rejected with 403, which guards against DNS rebinding.
 - It keeps running when stdin closes, so it can run as a detached service. Stdio mode exits instead.
 - In stateless mode, notifications such as a changed tool list are not pushed. Clients see newly started store tools the next time they list tools.
