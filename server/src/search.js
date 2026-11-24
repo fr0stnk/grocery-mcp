@@ -5,14 +5,15 @@ export const SEARCH_TOOL = {
   name: 'search_all_stores',
   title: 'Search all stores',
   description:
-    'Search Shufersal and Rami Levy at once (Hebrew works best). Returns one list sorted by price per liter or kilogram, ' +
+    'Search Shufersal and Rami Levy at once. The catalogs are in Hebrew: translate the user\'s request into a Hebrew query first ' +
+    '(молоко / milk → חלב), and retry with a simpler Hebrew term if nothing is found. Returns one list sorted by price per liter or kilogram, ' +
     'then price, with per-store status. A store that fails is reported in `stores` and the other store still answers. ' +
     'Products are not matched across stores: compare by name, size and pricePerUnit, and tell the user which items you treat as equivalent.',
   annotations: { readOnlyHint: true, openWorldHint: true },
   inputSchema: {
     type: 'object',
     properties: {
-      query: { type: 'string', minLength: 1, description: 'What to search for, e.g. "חלב 3%"' },
+      query: { type: 'string', minLength: 1, description: 'Hebrew search terms, e.g. "חלב 3%". Translate Russian or English requests first.' },
       limit: { type: 'integer', minimum: 1, maximum: 20, default: 10, description: 'Maximum results per store' },
       stores: {
         type: 'array',

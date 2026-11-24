@@ -53,6 +53,14 @@ It returns JSON text like this:
 - Products are not matched across stores. The Rami Levy integration returns its own product IDs, not barcodes. The server instructions ask the client to compare by name, size and unit price, and to say which items it treats as equivalent.
 - A store that fails, returns an error or takes more than 45 seconds is reported in `stores`. The other store's results are still returned.
 
+### Language
+
+Both catalogs are in Hebrew, while users often write in Russian or English. The server instructions and the `search_all_stores` description tell the client to:
+
+- translate requests into Hebrew search terms,
+- retry with a simpler term or synonym when nothing is found,
+- answer in the user's language, showing the Hebrew product names with a translation and prices in ₪.
+
 ### Forwarded store tools
 
 Each adapter's tools are listed with their input schemas unchanged. Each name carries a store prefix, and each description starts with the store name:

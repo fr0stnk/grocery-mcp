@@ -111,3 +111,12 @@ test('read-only mode lists only read tools and refuses writes', async () => {
   const search = JSON.parse((await client.callTool({ name: 'search_all_stores', arguments: { query: 'חלב' } })).content[0].text);
   assert.equal(search.stores.shufersal.ok, true);
 });
+
+test('instructions and the search tool tell clients to search in Hebrew', async () => {
+  const { url } = await startHttp();
+  const client = await connect(url);
+  assert.match(client.getInstructions(), /catalogs are in Hebrew/);
+  assert.match(client.getInstructions(), /Answer in the user's language/);
+  const search = (await client.listTools()).tools.find((t) => t.name === 'search_all_stores');
+  assert.match(search.description, /translate the user's request into a Hebrew query/);
+});
