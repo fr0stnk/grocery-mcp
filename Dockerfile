@@ -18,7 +18,7 @@ USER node
 CMD ["node", "dist/index.js"]
 
 FROM base AS shufersal
-COPY upstream/shufersal-cart/package*.json ./
+COPY --chown=node:node upstream/shufersal-cart/package*.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 COPY --chown=node:node upstream/shufersal-cart/LICENSE upstream/shufersal-cart/tsconfig.json ./
 COPY --chown=node:node upstream/shufersal-cart/bin ./bin
