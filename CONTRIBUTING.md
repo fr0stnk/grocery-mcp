@@ -43,6 +43,29 @@ Add tests for new behavior. Tests use the fixtures in `server/test/fixtures/` an
 - Keep personal data out of code, examples and docs: account emails, store IDs, hostnames, tokens and real basket contents.
 - The store integrations under `upstream/` are pinned submodules. Fix their bugs upstream, then update the pin in a separate pull request. Dependabot proposes new upstream revisions weekly.
 
+## Versioning and releases
+
+Releases follow [Semantic Versioning](https://semver.org): `MAJOR.MINOR.PATCH`, tagged `vMAJOR.MINOR.PATCH`. The version lives in `server/package.json`. The server reports it to MCP clients, and CI refuses a release tag that does not match it.
+
+| Bump | When | Examples |
+|---|---|---|
+| **MAJOR** | A change that breaks existing clients or deployments | Removing or renaming a tool, an argument or an output field; changing a field's meaning; renaming an environment variable or compose service; anything that needs manual steps on the server |
+| **MINOR** | A backwards-compatible feature | A new tool or optional argument, a new output field, a new store, a new optional setting |
+| **PATCH** | A backwards-compatible fix | A wrong price or size parse, an error message, a dependency or base image update, a documentation-only release |
+
+While the version is `0.x`, the interfaces are still settling. A breaking change then bumps MINOR instead of MAJOR, as Semantic Versioning allows for initial development, and the release notes must call it out. Release `1.0.0` once the tools and settings are stable, and apply the table strictly from then on.
+
+To release, from a clean `main`:
+
+```sh
+cd server && npm version minor --no-git-tag-version && cd ..   # or major / patch
+git commit -am "Release v$(node -p "require('./server/package.json').version")"
+git tag -a "v$(node -p "require('./server/package.json').version")" -m "Release notes summary"
+git push origin main --follow-tags
+```
+
+The tag builds and publishes the images, creates the GitHub release, and deploys it to the server once the images are published.
+
 ## Images
 
 Pull requests that touch image inputs run the tests and build every image for amd64 and arm64 without publishing. Merges to `main` publish them to GHCR. See [Images and CI](README.md#images-and-ci).

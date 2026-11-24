@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { request } from 'node:http';
 import { after, test } from 'node:test';
 import { createGroceryServer } from '../src/app.js';
@@ -27,6 +28,10 @@ test('startHttpServer answers MCP requests in process', async () => {
   assert.equal(res.status, 200);
   const names = (await res.json()).result.tools.map((t) => t.name);
   assert.deepEqual(names, ['search_all_stores', 'compare_basket']);
+
+  const init = await fetch(`${base}/mcp`, rpc({ jsonrpc: '2.0', id: 2, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 't', version: '0' } } }));
+  const { version } = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+  assert.deepEqual((await init.json()).result.serverInfo, { name: 'grocery-mcp', version });
 });
 
 test('startHttpServer rejects unknown paths, methods, bad JSON and foreign hosts', async () => {

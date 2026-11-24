@@ -4,6 +4,7 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { BASKET_TOOL, compareBasket } from './basket.js';
 import { SEARCH_TOOL, searchAllStores } from './search.js';
+import { VERSION } from './version.js';
 
 const FORWARD_TIMEOUT_MS = 110_000;
 
@@ -53,7 +54,7 @@ function describeCall(name, args, result) {
 
 export function createGroceryServer(stores, { readOnly = false, log = () => {} } = {}) {
   const server = new Server(
-    { name: 'grocery-mcp', version: '0.2.0' },
+    { name: 'grocery-mcp', version: VERSION },
     { capabilities: { tools: { listChanged: true } }, instructions: buildInstructions(stores, { readOnly }) },
   );
 

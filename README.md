@@ -135,7 +135,7 @@ The compose files use these images by default. `GROCERY_IMAGE_TAG` pins a tag, f
 
 ### Releases
 
-Pushing a version tag publishes a release:
+Versions follow `MAJOR.MINOR.PATCH`. The rules and release steps are in [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-releases). Pushing a version tag publishes a release:
 
 ```sh
 git tag -a v0.1.0 -m "v0.1.0" && git push origin v0.1.0
@@ -150,7 +150,7 @@ CodeQL default setup scans the JavaScript, Python and workflow code on each push
 [`deploy.yml`](.github/workflows/deploy.yml) deploys a release to one server after that release's images are published. You can also start it from **Actions → Deploy → Run workflow**, optionally with a tag. It deploys the latest release by default. A deploy works like this:
 
 1. The runner joins your Tailscale network for the length of the job, using a `tag:ci` identity. No port is opened to the internet.
-2. It connects over SSH with a deploy key that the server only accepts for running [`scripts/deploy_receiver.py`](scripts/deploy_receiver.py) (`restrict,command=…`). The server's host key is pinned.
+2. It connects over SSH with a deploy key that the server only accepts for running [`scripts/deploy_receiver.py`](scripts/deploy_receiver.py) (`restrict,command=…`), and only from Tailscale addresses (`from="100.64.0.0/10,…"`). The server's host key is pinned.
 3. It sends one JSON request on stdin with the release tag and the credentials from the GitHub environment **production**.
 4. The receiver checks the request and backs up the files it will change. It writes `.env` and the tunnel files, checks out the tag, and pulls that version's images. It then restarts `grocery-http` and the tunnels and waits until each reports ready. If anything fails, it restores the backups and the previous commit.
 
