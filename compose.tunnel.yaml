@@ -2,7 +2,7 @@
 # through an OpenAI Secure MCP Tunnel. See tunnel/README.md.
 #   docker compose -f compose.yaml -f compose.tunnel.yaml up -d grocery-http tunnel
 x-tunnel-client: &tunnel-client
-  image: grocery-mcp-tunnel:latest
+  image: ${GROCERY_IMAGE_PREFIX:-ghcr.io/fr0stnk/grocery-mcp}-tunnel:${GROCERY_IMAGE_TAG:-latest}
   build:
     context: .
     target: tunnel
@@ -26,7 +26,7 @@ x-tunnel-client: &tunnel-client
 
 services:
   grocery-http:
-    image: grocery-mcp-grocery:latest
+    image: ${GROCERY_IMAGE_PREFIX:-ghcr.io/fr0stnk/grocery-mcp}-grocery:${GROCERY_IMAGE_TAG:-latest}
     build:
       context: .
       target: grocery

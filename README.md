@@ -18,11 +18,13 @@ For an existing clone, run `git submodule update --init --recursive` from the re
 
 ## Run with Docker Compose
 
-From the repository root, build the images on your Docker host. The containers use Node 22.
+Prebuilt images for `linux/amd64` and `linux/arm64`, such as a Raspberry Pi, are published to GitHub Container Registry. From the repository root, pull them:
 
 ```sh
-docker compose build
+docker compose pull
 ```
+
+To build locally instead, run `docker compose build`. The containers use Node 22.
 
 Then create your private `.env` from the example and fill it in as described in [Credentials](#credentials):
 
@@ -109,6 +111,25 @@ A store that cannot start, for example because its credentials are missing, is r
 
 To use a single store's server without the combined server, run `docker compose run --rm -T rami-levy` or `docker compose run --rm -T shufersal`.
 
+## Images and CI
+
+[`.github/workflows/images.yml`](.github/workflows/images.yml) runs on every push and pull request:
+
+1. It runs the server tests.
+2. It builds the `grocery`, `rami-levy`, `shufersal` and `tunnel` images for amd64 and arm64.
+
+Pushes to `main` publish the images as `ghcr.io/fr0stnk/grocery-mcp-<image>`, tagged `latest` and `sha-<commit>`. `v*` tags also publish a version tag. Pull requests only test and build.
+
+The compose files use these images by default. `GROCERY_IMAGE_TAG` pins a tag, for example `sha-1a2b3c4`. `GROCERY_IMAGE_PREFIX` points to another registry or to local names.
+
+To update a server:
+
+```sh
+git pull --ff-only && git submodule update --init --recursive
+docker compose pull          # add -f compose.tunnel.yaml for grocery-http and tunnel
+docker compose up -d         # only for long-running services such as grocery-http
+```
+
 ## Repository layout
 
 | Path | Contents |
@@ -119,5 +140,6 @@ To use a single store's server without the combined server, run `docker compose 
 | [`assets/`](assets/README.md) | The server icon, as SVG and as a 256 px PNG for ChatGPT |
 | [`tunnel/`](tunnel/README.md) | Connecting ChatGPT through an OpenAI Secure MCP Tunnel, with no public URL |
 | `Dockerfile`, `compose.yaml` | Images and services for `grocery`, `rami-levy` and `shufersal` |
+| `.github/workflows/` | Tests and multi-platform image publishing |
 | `compose.tunnel.yaml` | Optional `grocery-http` and `tunnel` services for ChatGPT |
 | `.env.example` | Every credential and setting, with placeholders |
