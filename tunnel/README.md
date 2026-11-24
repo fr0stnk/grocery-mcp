@@ -66,7 +66,7 @@ docker compose -f compose.yaml -f compose.tunnel.yaml logs --tail 50 tunnel
 On chatgpt.com in a web browser, signed in as the same user:
 
 1. Open **Plugins**, select **+** and then **Add custom MCP server**.
-2. Enter a name, for example `Grocery`. Under **Connection** choose **Tunnel**, then pick the tunnel or paste its ID.
+2. Enter a name, for example `Grocery`, and optionally upload `assets/grocery-mcp-256.png` as the icon. Under **Connection** choose **Tunnel**, then pick the tunnel or paste its ID.
 3. Set **Authentication** to **No authentication**. The tunnel's account association controls who can reach it.
 4. Confirm the warning and create the plugin. Then install it and use it in a chat by typing `@` and choosing it.
 

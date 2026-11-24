@@ -115,6 +115,7 @@ To use a single store's server without the combined server, run `docker compose 
 | [`server/`](server/README.md) | The combined MCP server: how it works, configuration, local runs and tests |
 | [`scripts/`](scripts/README.md) | Setup helpers, such as saving Rami Levy tokens into `.env` |
 | `upstream/` | The pinned Rami Levy and Shufersal integrations, as git submodules |
+| [`assets/`](assets/README.md) | The server icon, as SVG and as a 256 px PNG for ChatGPT |
 | [`tunnel/`](tunnel/README.md) | Connecting ChatGPT through an OpenAI Secure MCP Tunnel, with no public URL |
 | `Dockerfile`, `compose.yaml` | Images and services for `grocery`, `rami-levy` and `shufersal` |
 | `compose.tunnel.yaml` | Optional `grocery-http` and `tunnel` services for ChatGPT |
