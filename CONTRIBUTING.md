@@ -26,6 +26,12 @@ npm test           # all tests, with stand-in store adapters and catalog
 npm run coverage   # tests with coverage; fails below 95% lines, 80% branches, 85% functions
 ```
 
+For the helper scripts, from the repository root:
+
+```sh
+python3 -m unittest discover -s scripts/tests -v
+```
+
 Add tests for new behavior. Tests use the fixtures in `server/test/fixtures/` and local stand-in servers, never the real stores. If a change depends on live store behavior, describe in the pull request how you verified it.
 
 ## Changes

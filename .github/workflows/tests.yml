@@ -1,0 +1,69 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "server/**"
+      - "!server/**/*.md"
+      - "scripts/**"
+      - "!scripts/**/*.md"
+      - .github/workflows/tests.yml
+  pull_request:
+    paths:
+      - "server/**"
+      - "!server/**/*.md"
+      - "scripts/**"
+      - "!scripts/**/*.md"
+      - .github/workflows/tests.yml
+  workflow_dispatch:
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  server:
+    name: Server (lint, tests, coverage)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - name: Test with coverage thresholds
+        run: npm run coverage 2>&1 | tee coverage.txt
+      - name: Coverage summary
+        if: always()
+        run: |
+          {
+            echo '### Server test coverage'
+            echo '```'
+            sed -n '/start of coverage report/,/end of coverage report/p' coverage.txt | sed 's/^# //'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  scripts:
+    name: Scripts (Python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m unittest discover -s scripts/tests -v

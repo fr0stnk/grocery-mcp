@@ -1,6 +1,12 @@
 # Scripts
 
-These are helper scripts for setting up Grocery MCP. Run them from the repository root. They need only Python 3 and its standard library.
+These are helper scripts for setting up Grocery MCP. Run them from the repository root. They need only Python 3.10 or newer and its standard library.
+
+Their tests are in `tests/` and use only `unittest`. They never touch the clipboard, SSH or real files outside a temporary folder. Run them with:
+
+```sh
+python3 -m unittest discover -s scripts/tests -v
+```
 
 | Script | Purpose |
 |---|---|

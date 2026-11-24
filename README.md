@@ -1,6 +1,7 @@
 # Grocery MCP
 
-[![Tests and images](https://github.com/fr0stnk/grocery-mcp/actions/workflows/images.yml/badge.svg)](https://github.com/fr0stnk/grocery-mcp/actions/workflows/images.yml)
+[![Tests](https://github.com/fr0stnk/grocery-mcp/actions/workflows/tests.yml/badge.svg)](https://github.com/fr0stnk/grocery-mcp/actions/workflows/tests.yml)
+[![Images](https://github.com/fr0stnk/grocery-mcp/actions/workflows/images.yml/badge.svg)](https://github.com/fr0stnk/grocery-mcp/actions/workflows/images.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Node.js 22.13+](https://img.shields.io/badge/node-%E2%89%A522.13-brightgreen.svg)](server/package.json)
 [![Images: amd64 and arm64](https://img.shields.io/badge/images-amd64%20%7C%20arm64-informational.svg)](https://github.com/fr0stnk?tab=packages&repo_name=grocery-mcp)
@@ -118,6 +119,11 @@ To use a single store's server without the combined server, run `docker compose 
 
 ## Images and CI
 
+[`.github/workflows/tests.yml`](.github/workflows/tests.yml) runs on pushes and pull requests that change `server/` or `scripts/`, excluding Markdown. It has two jobs:
+
+- **Server:** ESLint, then the tests with coverage thresholds. The coverage table goes to the run summary.
+- **Scripts:** the helper scripts' unit tests on Python 3.10 to 3.13.
+
 [`.github/workflows/images.yml`](.github/workflows/images.yml) runs on pushes and pull requests that change the `Dockerfile`, `.dockerignore`, the server code, the pinned integrations or the workflow itself. Documentation, compose files and scripts do not trigger a build. Version tags and manual runs always do. Each run:
 
 1. It runs the server tests.
@@ -145,7 +151,7 @@ docker compose up -d         # only for long-running services such as grocery-ht
 | [`assets/`](assets/README.md) | The server icon, as SVG and as a 256 px PNG for ChatGPT |
 | [`tunnel/`](tunnel/README.md) | Connecting ChatGPT through an OpenAI Secure MCP Tunnel, with no public URL |
 | `Dockerfile`, `compose.yaml` | Images and services for `grocery`, `rami-levy` and `shufersal` |
-| `.github/workflows/` | Tests and multi-platform image publishing |
+| `.github/workflows/` | Tests, and multi-platform image publishing |
 | `compose.tunnel.yaml` | Optional `grocery-http` and `tunnel` services for ChatGPT |
 | `.env.example` | Every credential and setting, with placeholders |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md), [`SECURITY.md`](SECURITY.md) | Development setup and checks, and how to report vulnerabilities |
