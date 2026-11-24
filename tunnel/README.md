@@ -19,8 +19,8 @@ Both services are defined in `../compose.tunnel.yaml`. Both have a read-only roo
 | Path | In git | Contents |
 |---|---|---|
 | `README.md` | yes | This guide |
-| `tunnel.yaml` | no | The tunnel ID and local addresses, written by `scripts/setup_openai_tunnel.py` |
-| `secrets/openai-tunnel.key` | no | The tunnel runtime API key, mode `0600` |
+| `tunnel.yaml`, `extra.yaml` | no | Tunnel IDs and local addresses, written by `scripts/setup_openai_tunnel.py` |
+| `secrets/openai-tunnel.key`, `secrets/extra.key` | no | Tunnel runtime API keys, mode `0600` |
 | `runtime/tunnel-client` | no | The `tunnel-client` binary for the server's architecture |
 
 ## Setup
@@ -71,6 +71,18 @@ On chatgpt.com in a web browser, signed in as the same user:
 4. Confirm the warning and create the plugin. Then install it and use it in a chat by typing `@` and choosing it.
 
 ChatGPT asks for confirmation before any tool that is not marked read-only, such as cart changes. Searches and other reads run without asking.
+
+## A second ChatGPT account
+
+A tunnel is visible only to the workspaces it is associated with. To give another ChatGPT account access, such as a personal account outside your workspace, create a separate tunnel and key in that account's Platform organization, as in step 1. Then serve it with the optional `tunnel-extra` service, which uses the same `grocery-http`:
+
+```sh
+python3 scripts/setup_openai_tunnel.py --name extra     # writes tunnel/extra.yaml and tunnel/secrets/extra.key
+docker compose -f compose.yaml -f compose.tunnel.yaml --profile extra up -d tunnel-extra
+curl -fsS http://127.0.0.1:8793/readyz
+```
+
+That account then adds the plugin as in step 5, with its own tunnel ID. Both accounts use the same store logins, so they share carts.
 
 ## Operation
 

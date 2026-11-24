@@ -85,4 +85,5 @@ Both are ignored by git. The script refuses a tunnel ID or key that does not loo
 |---|---|
 | `--mcp-url URL` | The MCP endpoint the tunnel forwards to (default `http://127.0.0.1:8791/mcp`) |
 | `--health ADDR` | tunnel-client's health and admin address (default `127.0.0.1:8792`) |
-| `--keep-key` | Only rewrite `tunnel.yaml`, for example for a new tunnel ID, and keep the saved key |
+| `--name NAME` | Write `tunnel/NAME.yaml` and `tunnel/secrets/NAME.key`. Use `extra` for the optional `tunnel-extra` service, which serves a second ChatGPT account. The health address defaults to `127.0.0.1:8793`. |
+| `--keep-key` | Only rewrite the tunnel config, for example for a new tunnel ID, and keep the saved key |

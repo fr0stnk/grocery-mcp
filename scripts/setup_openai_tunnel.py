@@ -5,7 +5,10 @@ Prompts for the tunnel ID and for the tunnel runtime API key (hidden input),
 then writes:
   tunnel/tunnel.yaml                 tunnel ID and local addresses (mode 0600)
   tunnel/secrets/openai-tunnel.key   the runtime key (mode 0600, folder 0700)
-Both are ignored by git. The key is never printed or passed as an argument.
+With --name extra it writes tunnel/extra.yaml and tunnel/secrets/extra.key
+instead, for the optional tunnel-extra service that serves a second ChatGPT
+account. Both are ignored by git. The key is never printed or passed as an
+argument.
 
 Create the tunnel and a restricted key (Tunnels: Read + Use) in the OpenAI
 Platform organization of the ChatGPT account that will use it. See
@@ -53,15 +56,20 @@ def write_private(path, text):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--mcp-url", default="http://127.0.0.1:8791/mcp", help="the grocery-http endpoint (default: %(default)s)")
-    ap.add_argument("--health", default="127.0.0.1:8792", help="tunnel-client health and admin address (default: %(default)s)")
+    ap.add_argument("--name", help="save as tunnel/NAME.yaml and tunnel/secrets/NAME.key, for example extra for tunnel-extra")
+    ap.add_argument("--health", help="tunnel-client health and admin address (default: 127.0.0.1:8792, or 127.0.0.1:8793 with --name)")
     ap.add_argument("--keep-key", action="store_true", help="only rewrite tunnel.yaml and keep the saved key")
     opts = ap.parse_args()
+    if opts.name is not None and not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,30}", opts.name):
+        sys.exit("--name must be lowercase letters, digits and dashes.")
+    config_path = TUNNEL_DIR / (f"{opts.name}.yaml" if opts.name else "tunnel.yaml")
+    key_path = TUNNEL_DIR / "secrets" / (f"{opts.name}.key" if opts.name else "openai-tunnel.key")
+    health = opts.health or ("127.0.0.1:8793" if opts.name else "127.0.0.1:8792")
 
     tunnel_id = input("Tunnel ID (tunnel_...): ").strip()
     if not re.fullmatch(r"tunnel_[A-Za-z0-9]+", tunnel_id):
         sys.exit("That does not look like a tunnel ID (tunnel_ followed by letters and digits). Nothing saved.")
 
-    key_path = TUNNEL_DIR / "secrets" / "openai-tunnel.key"
     if not opts.keep_key:
         key = getpass.getpass("Tunnel runtime API key (input hidden): ").strip()
         if not key.startswith("sk-") or any(c.isspace() for c in key):
@@ -71,8 +79,8 @@ def main():
     elif not key_path.exists():
         sys.exit(f"--keep-key given but {key_path} does not exist.")
 
-    write_private(TUNNEL_DIR / "tunnel.yaml", CONFIG.format(tunnel_id=tunnel_id, health=opts.health, mcp_url=opts.mcp_url))
-    print(f"Saved {TUNNEL_DIR / 'tunnel.yaml'} and {key_path} (mode 0600). The key was not printed.")
+    write_private(config_path, CONFIG.format(tunnel_id=tunnel_id, health=health, mcp_url=opts.mcp_url))
+    print(f"Saved {config_path} and {key_path} (mode 0600). The key was not printed.")
     binary = TUNNEL_DIR / "runtime" / "tunnel-client"
     if not binary.exists():
         print(f"Still needed: the tunnel-client binary at {binary}. See tunnel/README.md.")

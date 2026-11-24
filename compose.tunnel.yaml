@@ -1,6 +1,24 @@
 # Optional: run the combined server over HTTP and connect it to ChatGPT
 # through an OpenAI Secure MCP Tunnel. See tunnel/README.md.
 #   docker compose -f compose.yaml -f compose.tunnel.yaml up -d grocery-http tunnel
+x-tunnel-client: &tunnel-client
+  image: grocery-mcp-tunnel:latest
+  build:
+    context: .
+    target: tunnel
+  restart: unless-stopped
+  depends_on: [grocery-http]
+  network_mode: host
+  command: ["run", "--config", "/config/tunnel.yaml"]
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  pids_limit: 64
+  tmpfs: ["/tmp:size=32m,noexec,nosuid,nodev"]
+  logging:
+    driver: json-file
+    options: {max-size: "5m", max-file: "2"}
+
 services:
   grocery-http:
     image: grocery-mcp-grocery:latest
@@ -35,23 +53,19 @@ services:
       options: {max-size: "5m", max-file: "2"}
 
   tunnel:
-    image: grocery-mcp-tunnel:latest
-    build:
-      context: .
-      target: tunnel
-    restart: unless-stopped
-    depends_on: [grocery-http]
-    network_mode: host
-    command: ["run", "--config", "/config/tunnel.yaml"]
-    read_only: true
-    cap_drop: [ALL]
-    security_opt: ["no-new-privileges:true"]
-    pids_limit: 64
-    tmpfs: ["/tmp:size=32m,noexec,nosuid,nodev"]
+    <<: *tunnel-client
     volumes:
       - ./tunnel/runtime/tunnel-client:/opt/tunnel-client:ro
       - ./tunnel/tunnel.yaml:/config/tunnel.yaml:ro
       - ./tunnel/secrets/openai-tunnel.key:/run/secrets/openai-tunnel.key:ro
-    logging:
-      driver: json-file
-      options: {max-size: "5m", max-file: "2"}
+
+  # A second tunnel for another ChatGPT account, such as a personal account
+  # outside the first tunnel's workspace. It serves the same grocery-http.
+  # Configure it with: python3 scripts/setup_openai_tunnel.py --name extra
+  tunnel-extra:
+    <<: *tunnel-client
+    profiles: [extra]
+    volumes:
+      - ./tunnel/runtime/tunnel-client:/opt/tunnel-client:ro
+      - ./tunnel/extra.yaml:/config/tunnel.yaml:ro
+      - ./tunnel/secrets/extra.key:/run/secrets/openai-tunnel.key:ro
