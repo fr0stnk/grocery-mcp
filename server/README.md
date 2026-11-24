@@ -55,11 +55,11 @@ It returns JSON text like this:
 
 ### Language
 
-Both catalogs are in Hebrew, while users often write in Russian or English. The server instructions and the `search_all_stores` description tell the client to:
+Users may write in Hebrew, Russian or English, while both catalogs are in Hebrew. The server instructions and the `search_all_stores` description tell the client to:
 
-- translate requests into Hebrew search terms,
+- search with Hebrew requests as written, and translate Russian or English requests into Hebrew search terms first,
 - retry with a simpler term or synonym when nothing is found,
-- answer in the user's language, showing the Hebrew product names with a translation and prices in ₪.
+- answer in the user's language, showing the Hebrew product names with a translation (none for Hebrew speakers) and prices in ₪.
 
 ### Forwarded store tools
 

@@ -118,5 +118,6 @@ test('instructions and the search tool tell clients to search in Hebrew', async 
   assert.match(client.getInstructions(), /catalogs are in Hebrew/);
   assert.match(client.getInstructions(), /Answer in the user's language/);
   const search = (await client.listTools()).tools.find((t) => t.name === 'search_all_stores');
-  assert.match(search.description, /translate the user's request into a Hebrew query/);
+  assert.match(search.description, /use Hebrew requests as written/);
+  assert.match(client.getInstructions(), /Hebrew, Russian or English/);
 });

@@ -10,7 +10,7 @@ export function buildInstructions(stores, { readOnly }) {
   return [
     'Grocery tools for two Israeli supermarkets: Shufersal and Rami Levy.',
     'Use search_all_stores to compare prices across stores. It does not match products between stores, so compare by name, size and pricePerUnit, and say which items you treat as equivalent.',
-    'Language: users often write in Russian or English, but both store catalogs are in Hebrew. Translate each product request into Hebrew before searching (молоко / milk → חלב, яйца / eggs → ביצים, творог → קוטג\' or גבינה לבנה). If a search returns nothing, retry with a shorter or more common Hebrew term or a synonym before saying it is unavailable. Answer in the user\'s language. Show each product\'s Hebrew name as returned with a short translation, and prices in ₪.',
+    'Language: users may write in Hebrew, Russian or English, and both store catalogs are in Hebrew. Search with Hebrew terms: use Hebrew requests as written, and translate Russian or English ones first (молоко / milk → חלב, яйца / eggs → ביצים, творог → קוטג\' or גבינה לבנה). If a search returns nothing, retry with a shorter or more common Hebrew term or a synonym before saying it is unavailable. Answer in the user\'s language. Show each product\'s Hebrew name as returned, with a short translation unless the user writes Hebrew, and prices in ₪.',
     readOnly
       ? 'This server is read-only: searching, carts, orders and status can be viewed, but nothing can be added, changed or removed.'
       : 'Each store keeps its own cart. Store tools are prefixed shufersal_ and rami_levy_. None of them can check out or pay.',
