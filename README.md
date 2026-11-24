@@ -45,7 +45,7 @@ Configure your MCP client to launch the combined server from the checkout. The c
 docker compose run --rm -T grocery
 ```
 
-The named volumes preserve the Rami Levy basket and the Shufersal session and product choices between runs. The combined server and the single-store services share the same volumes.
+The named volumes preserve the Rami Levy basket, the Shufersal session and product choices, and the household preferences between runs. The combined server and the single-store services share the same volumes.
 
 ## Credentials
 
@@ -111,6 +111,8 @@ RAMI_LEVY_COOKIE='cf_clearance=AbC...; _ga=GA1.1...; other=value'
 
 - `search_all_stores` searches both stores at once. Results are sorted by price per liter or kilogram, then by price, and each store's status is reported. If one store fails, the other store's results are still returned. Products with the same barcode in both stores are paired, with the cheaper store named. Rami Levy promotions, such as multi-buy offers, are included.
 - `compare_basket` prices a whole shopping list in both stores. It prefers identical products by barcode and applies Rami Levy multi-buy promotions. It returns each store's total and missing items, a fair comparison over items both stores have, and the total if the order is split. Searches are cached for 15 minutes, and recent prices are used if a store is briefly unavailable.
+- `add_basket_to_cart` adds the chosen store's basket to its real cart in one step, with a dry-run preview. Nothing is ordered or paid.
+- `list_preferences`, `save_preference` and `remove_preference` keep household products such as "milk = Tnuva 3% 1 L", pinned by barcode, on the server. `compare_basket` can then price "our usual basket". The data lives in the `grocery-data` volume.
 - Each store's own tools are forwarded with a store prefix, such as `shufersal_view_cart` and `rami_levy_add_item`. Carts are separate per store, and no tool checks out or pays.
 
 A store that cannot start, for example because its credentials are missing, is reported in search results. The other store keeps working. To run only one store, set `GROCERY_STORES` to `shufersal` or `rami-levy`.

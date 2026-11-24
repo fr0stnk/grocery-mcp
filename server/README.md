@@ -96,6 +96,35 @@ The result contains:
 
 A store that fails is reported in `stores`, and the other store is still priced.
 
+### `add_basket_to_cart`
+
+This tool adds several products to **one** store's real cart in a single call, usually the chosen store's offers from `compare_basket`. The client then asks for confirmation once instead of once per item.
+
+| Argument | Meaning |
+|---|---|
+| `store` | `shufersal` or `rami-levy` |
+| `items` | 1–60 of `{ productId, quantity, name?, price? }`. For Rami Levy, `name` and `price` are required and are taken from the offer as returned. |
+| `dry_run` | Preview only; the cart is not changed |
+
+- **Shufersal:** one call to the adapter's bulk `add_to_cart`, which also handles `dry_run`. It takes only whole units, so weighed items are added in Shufersal's app.
+- **Rami Levy:** one `rami_levy_add_item` per product. Each call syncs the whole cart, and quantities are added to what is already there. The tool reports each item's result. After 90 seconds it stops starting new adds and reports the rest as not attempted, which keeps it inside the OpenAI tunnel's 120-second limit.
+- Nothing is ordered or paid. Checkout happens in the store's app or site.
+
+### Household preferences
+
+`list_preferences`, `save_preference` and `remove_preference` manage products the household buys again. The data is shared by every client of the server: you and your family, ChatGPT and Claude.
+
+```json
+{ "name": "Milk", "barcode": "7290102398065", "query": "חלב 3%", "quantity": 2, "usual": true, "note": "only 1 L" }
+```
+
+- `name` can be in any language and is matched without regard to case.
+- `barcode` pins an exact product, and is preferred over `query`: searching a store by barcode returns exactly that product.
+- `quantity` is the default amount, and `usual` puts the item in the usual basket.
+- `compare_basket` accepts `{ "preference": "milk" }` items, and `usual: true` adds every preference marked usual.
+- The preferences live in `preferences.json` under `GROCERY_DATA_DIR`. In Docker that is the `grocery-data` volume at `/data/grocery`; locally it is `<repo>/.data`. The file is re-read on every call and replaced atomically with mode 0600, so the stdio and HTTP servers share it safely.
+- In read-only mode `save_preference`, `remove_preference` and `add_basket_to_cart` are hidden and refused.
+
 ### Search cache
 
 `search_all_stores` and `compare_basket` share an in-memory cache (`src/cache.js`), keyed by store, Rami Levy branch and query:
@@ -155,6 +184,8 @@ The adapters read their own variables, listed in the root `.env.example`. The se
 | `GROCERY_RAMI_LEVY_ENTRY` | `upstream/rami-levy-mcp/dist/index.js` | Rami Levy adapter entry point, relative to the repository root |
 | `GROCERY_RAMI_LEVY_SEARCH` | catalog | Set to `adapter` to search Rami Levy through the adapter's tool instead of its catalog API |
 | `GROCERY_RAMI_LEVY_CATALOG_URL` | Rami Levy's catalog API | Catalog endpoint override, used by the tests |
+| `GROCERY_DATA_DIR` | `<repo>/.data` locally, `/data/grocery` in Docker | Where `preferences.json` is kept |
+| `GROCERY_PREFERENCES_FILE` | `$GROCERY_DATA_DIR/preferences.json` | Exact preferences file, used by the tests |
 | `GROCERY_HTTP` | unset, which means stdio | Serve Streamable HTTP on `port` or `host:port`. The host defaults to `127.0.0.1`. |
 | `GROCERY_READ_ONLY` | off | When `1`, only tools annotated `readOnlyHint` are listed, and other forwarded tools are refused. `search_all_stores` always works. |
 
@@ -188,6 +219,7 @@ The tests use stand-in adapters from `test/fixtures/`, so they need no credentia
 
 - `normalize.test.js` covers size, price, barcode and promotion parsing, both stores' result shapes, weighed items, error reporting, sorting and barcode grouping. The cases come from live search results.
 - `http.test.js` runs the server in HTTP mode with stdin closed. It also checks catalog search against a local stand-in for the catalog API, including the store and User-Agent sent and the barcode pairing. It covers listing tools and annotations, search, two clients sharing one store process, 404, 405, 400 and a foreign `Host` header, and read-only mode.
+- `preferences.test.js` and `order.test.js` cover preference storage, validation and resolution into baskets, and both stores' cart paths, including failures, the time budget and dry runs.
 - `basket.test.js` covers the cache (TTL, stale fallback, merged loads), the concurrency limiter, match selection, promotion pricing, basket totals and a failing store.
 - `http-server.test.js` and `rami-catalog.test.js` test the HTTP listener and the catalog client in process, including error paths such as challenge pages, HTTP errors, refused connections and timeouts.
 - `server.test.js` starts real child processes. It covers startup failure messages, restart after an adapter exits, partial results when one store fails or hangs, tool forwarding and prefixes, instruction pass-through, and exit when stdin closes.
@@ -203,6 +235,9 @@ The tests use stand-in adapters from `test/fixtures/`, so they need no credentia
 | `src/stores.js` | `StoreClient`: one adapter process, with startup, restart and stderr capture |
 | `src/search.js` | `search_all_stores`, per-store cached search and barcode grouping |
 | `src/basket.js` | `compare_basket`: match selection, promotion pricing and totals |
+| `src/order.js` | `add_basket_to_cart`: Shufersal bulk add, Rami Levy per-item adds with a time budget |
+| `src/preferences.js` | Household preference store and its three tools |
+| `src/version.js` | Reads the version from `package.json` |
 | `src/cache.js` | Search cache with stale fallback, and the per-store concurrency limiter |
 | `src/normalize.js` | Converts each store's results to the shared shape, and parses sizes, prices, barcodes and promotions |
 | `src/rami-catalog.js` | Client for Rami Levy's public catalog search |

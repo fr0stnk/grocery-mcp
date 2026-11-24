@@ -45,7 +45,9 @@ services:
     volumes:
       - rami-data:/data/rami-levy
       - shufersal-data:/data/shufersal
+      - grocery-data:/data/grocery
 
 volumes:
   rami-data:
   shufersal-data:
+  grocery-data:

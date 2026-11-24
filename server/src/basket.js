@@ -14,7 +14,8 @@ export const BASKET_TOOL = {
     'relevant in-stock result (identical: false, so say the products differ). Rami Levy multi-buy promotions are applied when the quantity qualifies; ' +
     'club-only offers are listed but not applied. Returns per-store totals with missing items, a fair comparison over items both stores have, ' +
     'and the total if each item is bought where it is cheapest. Delivery fees and minimum orders are not included. ' +
-    'For weighed items (soldByWeight) the quantity is in kilograms. To order, add the chosen store\'s matches to that store\'s cart with its own tools.',
+    'For weighed items (soldByWeight) the quantity is in kilograms. Items may name a saved household preference instead of a query, ' +
+    'and usual: true adds every preference in the usual basket. To order, pass the chosen store\'s offers to add_basket_to_cart.',
   annotations: { readOnlyHint: true, openWorldHint: true },
   inputSchema: {
     type: 'object',
@@ -27,10 +28,10 @@ export const BASKET_TOOL = {
           type: 'object',
           properties: {
             query: { type: 'string', minLength: 1, description: 'Hebrew search terms for the item, e.g. "חלב 3% 1 ליטר"' },
-            quantity: { type: 'number', exclusiveMinimum: 0, maximum: 100, default: 1, description: 'Units, or kilograms for weighed items' },
+            preference: { type: 'string', minLength: 1, description: 'Name of a saved household preference instead of a query' },
+            quantity: { type: 'number', exclusiveMinimum: 0, maximum: 100, description: 'Units, or kilograms for weighed items (default 1, or the preference\'s quantity)' },
             barcode: { type: 'string', description: 'Optional exact product barcode from earlier search results' },
           },
-          required: ['query'],
           additionalProperties: false,
         },
       },
@@ -39,8 +40,8 @@ export const BASKET_TOOL = {
         items: { type: 'string', enum: ['shufersal', 'rami-levy'] },
         description: 'Only compare these stores (default: all configured stores)',
       },
+      usual: { type: 'boolean', description: 'Add every saved preference marked usual' },
     },
-    required: ['items'],
     additionalProperties: false,
   },
 };
@@ -116,16 +117,43 @@ function cheapest(offers) {
   return priced[0][1].lineTotal === priced[1][1].lineTotal ? null : priced[0][0];
 }
 
-export async function compareBasket(stores, args = {}, { timeoutMs = 45_000, cache = searchCache } = {}) {
-  if (!Array.isArray(args.items) || !args.items.length) throw new StoreError('items must be a non-empty list');
-  if (args.items.length > MAX_ITEMS) throw new StoreError(`at most ${MAX_ITEMS} items per basket`);
-  const items = args.items.map((it, i) => {
-    const query = typeof it?.query === 'string' ? it.query.trim() : '';
-    if (!query) throw new StoreError(`item ${i + 1} needs a query`);
-    const quantity = it.quantity == null ? 1 : Number(it.quantity);
+/**
+ * Turns the request into items with a search query. A saved preference or a
+ * pinned barcode is searched by its barcode, which returns exactly that
+ * product in every store that sells it.
+ */
+export function resolveItems(args, preferences) {
+  const requested = Array.isArray(args.items) ? [...args.items] : [];
+  if (args.usual) {
+    const usual = (preferences?.list() ?? []).filter((p) => p.usual);
+    if (!usual.length) throw new StoreError('no saved preference is marked usual');
+    const named = new Set(requested.map((it) => it?.preference?.trim().toLocaleLowerCase()).filter(Boolean));
+    for (const p of usual) if (!named.has(p.name.toLocaleLowerCase())) requested.push({ preference: p.name });
+  }
+  if (!requested.length) throw new StoreError('items must be a non-empty list, or set usual: true');
+  if (requested.length > MAX_ITEMS) throw new StoreError(`at most ${MAX_ITEMS} items per basket`);
+  return requested.map((it, i) => {
+    let { query, barcode, quantity } = it ?? {};
+    let preference;
+    if (it?.preference) {
+      const saved = preferences?.get(it.preference);
+      if (!saved) throw new StoreError(`item ${i + 1}: no saved preference named ${JSON.stringify(it.preference)}`);
+      preference = saved.name;
+      barcode ??= saved.barcode;
+      query ??= saved.query;
+      quantity ??= saved.quantity;
+    }
+    barcode = typeof barcode === 'string' && barcode.trim() ? barcode.trim() : undefined;
+    query = barcode ?? (typeof query === 'string' ? query.trim() : '');
+    if (!query) throw new StoreError(`item ${i + 1} needs a query, a barcode or a preference`);
+    quantity = quantity == null ? 1 : Number(quantity);
     if (!(quantity > 0 && quantity <= 100)) throw new StoreError(`item ${i + 1}: quantity must be above 0 and at most 100`);
-    return { query, quantity, barcode: typeof it.barcode === 'string' && it.barcode.trim() ? it.barcode.trim() : undefined };
+    return { query, quantity, barcode, ...(preference ? { preference } : {}) };
   });
+}
+
+export async function compareBasket(stores, args = {}, { timeoutMs = 45_000, cache = searchCache, preferences = null } = {}) {
+  const items = resolveItems(args, preferences);
   const selected = selectStores(stores, args.stores);
 
   // One search per distinct query and store; the cache also merges repeats.
@@ -164,7 +192,15 @@ export async function compareBasket(stores, args = {}, { timeoutMs = 45_000, cac
     const lists = Object.fromEntries(selected.map((s) => [s.id, searches.get(`${s.id}|${it.query}`)?.hit?.value ?? []]));
     const { matches, identical } = pickMatches(lists, { barcode: it.barcode });
     const offers = Object.fromEntries(selected.map((s) => [s.id, offer(matches[s.id], it.quantity)]));
-    return { query: it.query, quantity: it.quantity, ...(it.barcode ? { barcode: it.barcode } : {}), identical, cheapestStore: cheapest(offers), offers };
+    return {
+      query: it.query,
+      ...(it.preference ? { preference: it.preference } : {}),
+      quantity: it.quantity,
+      ...(it.barcode ? { barcode: it.barcode } : {}),
+      identical,
+      cheapestStore: cheapest(offers),
+      offers,
+    };
   });
 
   const totals = {};

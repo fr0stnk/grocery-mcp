@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -19,6 +21,7 @@ async function startHttp(extraEnv = {}) {
     env: {
       ...process.env,
       GROCERY_HTTP: '127.0.0.1:0',
+      GROCERY_PREFERENCES_FILE: path.join(mkdtempSync(path.join(tmpdir(), 'grocery-prefs-')), 'preferences.json'),
       GROCERY_RAMI_LEVY_SEARCH: 'adapter',
       GROCERY_SHUFERSAL_ENTRY: fixture('fake-shufersal.js'),
       GROCERY_RAMI_LEVY_ENTRY: fixture('fake-rami-levy.js'),
@@ -101,7 +104,9 @@ test('read-only mode lists only read tools and refuses writes', async () => {
   const { url } = await startHttp({ GROCERY_READ_ONLY: '1' });
   const client = await connect(url);
   const names = (await client.listTools()).tools.map((t) => t.name).sort();
-  assert.deepEqual(names, ['compare_basket', 'rami_levy_search_products', 'rami_levy_view_cart', 'search_all_stores']);
+  assert.deepEqual(names, ['compare_basket', 'list_preferences', 'rami_levy_search_products', 'rami_levy_view_cart', 'search_all_stores']);
+  const refusedOwn = await client.callTool({ name: 'add_basket_to_cart', arguments: { store: 'shufersal', items: [{ productId: 'P_1' }] } });
+  assert.match(refusedOwn.content[0].text, /read-only/);
   assert.match(client.getInstructions(), /read-only/);
 
   const refused = await client.callTool({ name: 'shufersal_view_cart', arguments: {} });
@@ -160,4 +165,26 @@ test('Rami Levy search uses the catalog and pairs barcodes with Shufersal', asyn
   assert.equal(basket.comparable.cheaperStore, 'rami-levy');
   assert.equal(basket.stores['rami-levy'].cached, true, 'the earlier search for the same query was reused');
   assert.equal(requests.length, 1);
+});
+
+test('preferences drive compare_basket and add_basket_to_cart previews over HTTP', async () => {
+  const { url } = await startHttp();
+  const client = await connect(url);
+  const call = async (name, args) => {
+    const result = await client.callTool({ name, arguments: args });
+    assert.notEqual(result.isError, true, result.content[0].text);
+    return JSON.parse(result.content[0].text);
+  };
+  const saved = await call('save_preference', { name: 'Milk', barcode: '7290102398065', quantity: 2, usual: true });
+  assert.equal(saved.created, true);
+  assert.equal((await call('list_preferences', {})).preferences[0].name, 'Milk');
+
+  const basket = await call('compare_basket', { usual: true });
+  assert.deepEqual([basket.items[0].preference, basket.items[0].quantity, basket.items[0].query], ['Milk', 2, '7290102398065']);
+  const offer = basket.items[0].offers.shufersal;
+  assert.equal(offer.productId, 'P_7290102398065');
+
+  const preview = await call('add_basket_to_cart', { store: 'shufersal', items: [{ productId: offer.productId, quantity: 2 }], dry_run: true });
+  assert.deepEqual([preview.store, preview.dryRun, preview.requested], ['shufersal', true, 1]);
+  assert.deepEqual(await call('remove_preference', { name: 'milk' }), { removed: 'Milk' });
 });

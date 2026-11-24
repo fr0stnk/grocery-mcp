@@ -53,6 +53,7 @@ services:
     volumes:
       - rami-data:/data/rami-levy
       - shufersal-data:/data/shufersal
+      - grocery-data:/data/grocery
     logging:
       driver: json-file
       options: {max-size: "5m", max-file: "2"}

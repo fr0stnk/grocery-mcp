@@ -3,6 +3,8 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { BASKET_TOOL, compareBasket } from './basket.js';
+import { ADD_BASKET_TOOL, addBasketToCart } from './order.js';
+import { PREFERENCE_TOOLS, runPreferenceTool } from './preferences.js';
 import { SEARCH_TOOL, searchAllStores } from './search.js';
 import { VERSION } from './version.js';
 
@@ -12,7 +14,8 @@ export function buildInstructions(stores, { readOnly }) {
   return [
     'Grocery tools for two Israeli supermarkets: Shufersal and Rami Levy.',
     'Use search_all_stores to compare prices of one product type across stores. Identical products are matched by barcode in sameProduct; compare the rest by name, size and pricePerUnit, and say which items you treat as equivalent.',
-    'For a shopping list, use compare_basket with all items at once: it returns each store\'s total, missing items, a fair comparison over items both stores have, and the split total. Mention items where identical is false, and that delivery fees are not included. To order, add the chosen store\'s matches to that store\'s cart.',
+    'For a shopping list, use compare_basket with all items at once: it returns each store\'s total, missing items, a fair comparison over items both stores have, and the split total. Mention items where identical is false, and that delivery fees are not included. To order, show the chosen store\'s list and pass its offers to add_basket_to_cart in one call instead of adding items one by one.',
+    'Household preferences: list_preferences shows saved products (for example "milk" pinned to an exact barcode). Use them for "the usual milk" or "our usual basket" (compare_basket with usual: true). When the user picks a product they want again, offer to save it with save_preference, using its barcode.',
     'Language: users may write in Hebrew, Russian or English, and both store catalogs are in Hebrew. Search with Hebrew terms: use Hebrew requests as written, and translate Russian or English ones first (молоко / milk → חלב, яйца / eggs → ביצים, творог → קוטג\' or גבינה לבנה). If a search returns nothing, retry with a shorter or more common Hebrew term or a synonym before saying it is unavailable. Answer in the user\'s language. Show each product\'s Hebrew name as returned, with a short translation unless the user writes Hebrew, and prices in ₪.',
     readOnly
       ? 'This server is read-only: searching, carts, orders and status can be viewed, but nothing can be added, changed or removed.'
@@ -49,10 +52,23 @@ function describeCall(name, args, result) {
     .map(([id, st]) => `${id}=${st.ok ? (st.stale ? 'stale' : st.cached ? 'cached' : 'live') : 'error'}`)
     .join(' ');
   if (name === SEARCH_TOOL.name) return `"${String(args.query ?? '').slice(0, 60)}" ${storeState}`;
-  return `${result.items?.length ?? 0} items ${storeState}`;
+  if (name === BASKET_TOOL.name) return `${result.items?.length ?? 0} items ${storeState}`;
+  if (name === ADD_BASKET_TOOL.name) return `${result.store} ${result.dryRun ? 'dry run ' : ''}${result.requested} items${result.added != null ? `, ${result.added} added` : ''}`;
+  return '';
 }
 
-export function createGroceryServer(stores, { readOnly = false, log = () => {} } = {}) {
+/** The server's own tools with their handlers; write tools are left out in read-only mode. */
+function ownTools(stores, preferences, { readOnly }) {
+  const tools = [
+    [SEARCH_TOOL, (args) => searchAllStores(stores, args)],
+    [BASKET_TOOL, (args) => compareBasket(stores, args, { preferences })],
+    [ADD_BASKET_TOOL, (args) => addBasketToCart(stores, args)],
+    ...PREFERENCE_TOOLS.map((tool) => [tool, (args) => runPreferenceTool(preferences, tool.name, args)]),
+  ];
+  return new Map(tools.filter(([tool]) => !readOnly || tool.annotations?.readOnlyHint === true).map(([tool, run]) => [tool.name, { tool, run }]));
+}
+
+export function createGroceryServer(stores, { readOnly = false, log = () => {}, preferences = null } = {}) {
   const server = new Server(
     { name: 'grocery-mcp', version: VERSION },
     { capabilities: { tools: { listChanged: true } }, instructions: buildInstructions(stores, { readOnly }) },
@@ -66,16 +82,16 @@ export function createGroceryServer(stores, { readOnly = false, log = () => {} }
   }
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: [SEARCH_TOOL, BASKET_TOOL, ...[...forwardedTools(stores, { readOnly }).values()].map((r) => r.listed)],
+    tools: [...[...ownTools(stores, preferences, { readOnly }).values()].map((t) => t.tool), ...[...forwardedTools(stores, { readOnly }).values()].map((r) => r.listed)],
   }));
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args = {} } = request.params;
-    const own = { [SEARCH_TOOL.name]: searchAllStores, [BASKET_TOOL.name]: compareBasket }[name];
+    const own = ownTools(stores, preferences, { readOnly }).get(name);
     if (own) {
       try {
         const started = Date.now();
-        const result = await own(stores, args);
+        const result = await own.run(args);
         log(`call ${name} ${describeCall(name, args, result)} in ${Date.now() - started} ms`);
         void refreshMissingTools();
         return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
@@ -86,7 +102,7 @@ export function createGroceryServer(stores, { readOnly = false, log = () => {} }
 
     const route = forwardedTools(stores, { readOnly }).get(name);
     if (!route) {
-      const hidden = readOnly && forwardedTools(stores, { readOnly: false }).has(name);
+      const hidden = readOnly && (forwardedTools(stores, { readOnly: false }).has(name) || ownTools(stores, preferences, { readOnly: false }).has(name));
       const text = hidden ? `${name} changes data and this server is read-only.` : `Unknown tool: ${name}`;
       return { isError: true, content: [{ type: 'text', text }] };
     }

@@ -40,8 +40,9 @@ COPY --from=shufersal --chown=node:node /app /app/upstream/shufersal-cart
 COPY --from=server-deps /app/node_modules /app/server/node_modules
 COPY --chown=node:node server/package.json /app/server/
 COPY --chown=node:node server/src /app/server/src
-RUN install -d -m 0700 -o node -g node /data/rami-levy /data/shufersal
-ENV RAMI_LEVY_DB_PATH=/data/rami-levy/cart.db \
+RUN install -d -m 0700 -o node -g node /data/rami-levy /data/shufersal /data/grocery
+ENV GROCERY_DATA_DIR=/data/grocery \
+    RAMI_LEVY_DB_PATH=/data/rami-levy/cart.db \
     SHUFERSAL_COOKIE_FILE=/data/shufersal/cookies.json \
     SHUFERSAL_CHOICES_FILE=/data/shufersal/choices.json
 USER node

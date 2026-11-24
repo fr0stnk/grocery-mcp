@@ -27,7 +27,7 @@ test('startHttpServer answers MCP requests in process', async () => {
   const res = await fetch(`${base}/mcp`, rpc({ jsonrpc: '2.0', id: 1, method: 'tools/list' }));
   assert.equal(res.status, 200);
   const names = (await res.json()).result.tools.map((t) => t.name);
-  assert.deepEqual(names, ['search_all_stores', 'compare_basket']);
+  assert.deepEqual(names, ['search_all_stores', 'compare_basket', 'add_basket_to_cart', 'list_preferences', 'save_preference', 'remove_preference']);
 
   const init = await fetch(`${base}/mcp`, rpc({ jsonrpc: '2.0', id: 2, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 't', version: '0' } } }));
   const { version } = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));

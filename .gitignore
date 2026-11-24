@@ -6,3 +6,4 @@ __pycache__/
 /tunnel/*.yaml
 /tunnel/secrets/
 /tunnel/runtime/
+/.data/
