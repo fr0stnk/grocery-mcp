@@ -1,6 +1,7 @@
 /**
- * Turns each adapter's search output into one shape:
- *   { store, productId, name, brand, size, price, pricePerUnit, perUnit, inStock }
+ * Turns each store's search output into one shape:
+ *   { store, productId, barcode, name, brand, size, price, pricePerUnit, perUnit, inStock }
+ * plus `promotions` and `soldByWeight` when they apply.
  * Prices are numbers in shekels. Missing data is null, never guessed.
  */
 
@@ -36,6 +37,12 @@ export function parseSize(text) {
   return { amount, unit, label: `${amount} ${unit}` };
 }
 
+/** A retail barcode (EAN-8, UPC-A, EAN-13 or GTIN-14); store-internal codes such as produce PLUs return null. */
+export function barcodeOf(value) {
+  const digits = String(value ?? '').trim().replace(/^P_/, '');
+  return /^(\d{8}|\d{12,14})$/.test(digits) ? digits : null;
+}
+
 export function parsePrice(value) {
   if (typeof value === 'number') return Number.isFinite(value) ? value : null;
   if (typeof value !== 'string') return null;
@@ -48,21 +55,27 @@ function round(n, digits = 2) {
   return Math.round(n * f) / f;
 }
 
-function item(store, { productId, name, brand = null, sizeText, price, inStock = null, byWeight = false }) {
-  const size = parseSize(sizeText) ?? parseSize(name);
+function item(store, { productId, barcode = null, name, brand = null, sizeText, price, inStock = null, byWeight = false, pricedPerKg = false, promotions = [] }) {
   const p = parsePrice(price);
-  // A weighed item's price is not tied to the pack size, so no unit price.
-  const unitPrice = !byWeight && size && p != null ? round(p / size.amount) : null;
+  // A weighed item's price is per kilogram when the store says so; otherwise
+  // it is not tied to the pack size, so no unit price is derived.
+  const size = byWeight ? null : (parseSize(sizeText) ?? parseSize(name));
+  let unitPrice = null;
+  let perUnit = null;
+  if (byWeight && pricedPerKg && p != null) [unitPrice, perUnit] = [p, 'kg'];
+  else if (size && p != null) [unitPrice, perUnit] = [round(p / size.amount), size.unit];
   return {
     store,
     productId: String(productId),
+    barcode,
     name: name ?? '',
     brand: brand || null,
     size: size?.label ?? null,
     price: p,
     pricePerUnit: unitPrice,
-    perUnit: unitPrice == null ? null : size.unit,
+    perUnit,
     inStock,
+    ...(promotions.length ? { promotions } : {}),
     ...(byWeight ? { soldByWeight: true } : {}),
   };
 }
@@ -82,6 +95,7 @@ export function normalizeShufersal(text) {
   return data.map((p) =>
     item('shufersal', {
       productId: p.code,
+      barcode: barcodeOf(p.code),
       name: p.name,
       brand: p.brand,
       sizeText: p.unit,
@@ -101,6 +115,46 @@ export function normalizeRamiLevy(text) {
   }
   if (!Array.isArray(data.results)) throw new StoreError('rami-levy: search result has no results array');
   return data.results.map((p) => item('rami-levy', { productId: p.productId, name: p.name, price: p.price }));
+}
+
+/**
+ * Rami Levy's promotion records, e.g. { cmt: 4, scm: 10, label: "4 for 10" }:
+ * cmt is the quantity and scm the price for that quantity.
+ */
+export function parsePromotions(sale) {
+  if (!Array.isArray(sale)) return [];
+  return sale
+    .filter((s) => s && s.active !== 0 && !s.deleted_at)
+    .map((s) => {
+      const quantity = Number(s.cmt) > 0 ? Number(s.cmt) : null;
+      const total = Number(s.scm) > 0 ? Number(s.scm) : null;
+      return {
+        text: s.label || s.name || '',
+        quantity,
+        price: total,
+        unitPrice: quantity && total ? round(total / quantity) : null,
+        until: typeof s.to === 'string' ? s.to.slice(0, 10) : null,
+        clubOnly: Boolean(s.is_club),
+        personal: Boolean(s.is_personal),
+      };
+    })
+    .filter((s) => s.text);
+}
+
+/** Rami Levy's public catalog API: { data: [{ id, barcode, name, price: { price }, prop: { by_kilo }, sale: [...] }] }. */
+export function normalizeRamiCatalog(data) {
+  if (!data || !Array.isArray(data.data)) throw new StoreError('rami-levy: catalog response has no data array');
+  return data.data.map((p) =>
+    item('rami-levy', {
+      productId: p.id,
+      barcode: barcodeOf(p.barcode),
+      name: p.name,
+      price: p.price?.price,
+      byWeight: Number(p.prop?.by_kilo) === 1,
+      pricedPerKg: true,
+      promotions: parsePromotions(p.sale),
+    }),
+  );
 }
 
 /** Cheapest per liter or kilogram first, then by price; items without a price go last. */

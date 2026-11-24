@@ -19,6 +19,7 @@ async function startHttp(extraEnv = {}) {
     env: {
       ...process.env,
       GROCERY_HTTP: '127.0.0.1:0',
+      GROCERY_RAMI_LEVY_SEARCH: 'adapter',
       GROCERY_SHUFERSAL_ENTRY: fixture('fake-shufersal.js'),
       GROCERY_RAMI_LEVY_ENTRY: fixture('fake-rami-levy.js'),
       ...extraEnv,
@@ -120,4 +121,36 @@ test('instructions and the search tool tell clients to search in Hebrew', async 
   const search = (await client.listTools()).tools.find((t) => t.name === 'search_all_stores');
   assert.match(search.description, /use Hebrew requests as written/);
   assert.match(client.getInstructions(), /Hebrew, Russian or English/);
+});
+
+test('Rami Levy search uses the catalog and pairs barcodes with Shufersal', async () => {
+  const { createServer } = await import('node:http');
+  const requests = [];
+  const catalog = createServer((req, res) => {
+    let body = '';
+    req.on('data', (d) => (body += d));
+    req.on('end', () => {
+      requests.push({ body: JSON.parse(body), ua: req.headers['user-agent'] });
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ status: 'ok', data: [
+        { id: 329258, barcode: 7290102398065, name: 'חלב 3% טרה 2 ליטר', price: { price: 14.9 }, prop: { by_kilo: 0 }, sale: [{ cmt: 2, scm: 25, label: '2 ב-25', active: 1 }] },
+      ] }));
+    });
+  });
+  await new Promise((r) => catalog.listen(0, '127.0.0.1', r));
+  cleanup.push(() => new Promise((r) => catalog.close(r)));
+
+  const { url } = await startHttp({
+    GROCERY_RAMI_LEVY_SEARCH: '',
+    GROCERY_RAMI_LEVY_CATALOG_URL: `http://127.0.0.1:${catalog.address().port}/api/catalog`,
+    RAMI_LEVY_STORE: '1214',
+    RAMI_LEVY_USER_AGENT: 'TestBrowser/1',
+  });
+  const client = await connect(url);
+  const out = JSON.parse((await client.callTool({ name: 'search_all_stores', arguments: { query: 'חלב' } })).content[0].text);
+  assert.deepEqual(requests.at(-1), { body: { q: 'חלב', store: '1214' }, ua: 'TestBrowser/1' });
+  assert.equal(out.stores['rami-levy'].ok, true);
+  assert.equal(out.sameProduct.length, 1);
+  assert.equal(out.sameProduct[0].cheapestStore, 'shufersal');
+  assert.equal(out.sameProduct[0].offers[1].promotions[0].unitPrice, 12.5);
 });

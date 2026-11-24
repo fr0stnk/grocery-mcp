@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { normalizeRamiLevy, normalizeShufersal } from './normalize.js';
+import { normalizeRamiCatalog, normalizeRamiLevy, normalizeShufersal } from './normalize.js';
+import { fetchRamiCatalog } from './rami-catalog.js';
 import { StoreClient } from './stores.js';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -20,7 +21,9 @@ export const STORE_DEFS = {
     toolPrefix: 'rami_levy_',
     entryEnv: 'GROCERY_RAMI_LEVY_ENTRY',
     entry: 'upstream/rami-levy-mcp/dist/index.js',
-    search: { tool: 'rami_levy_search_products', maxLimit: 50, normalize: normalizeRamiLevy },
+    // Searches the public catalog directly (barcodes, promotions, no login);
+    // GROCERY_RAMI_LEVY_SEARCH=adapter uses the adapter's search tool instead.
+    search: { tool: 'rami_levy_search_products', maxLimit: 30, normalize: normalizeRamiLevy, catalog: true },
     // The adapter declares no tool annotations. Without readOnlyHint, clients
     // such as ChatGPT treat every tool as a write and ask for confirmation.
     annotations: {
@@ -35,6 +38,22 @@ export const STORE_DEFS = {
     },
   },
 };
+
+function searchFor(def, env) {
+  if (!def.search.catalog || env.GROCERY_RAMI_LEVY_SEARCH === 'adapter') return def.search;
+  return {
+    ...def.search,
+    run: async ({ query, limit }) => {
+      const data = await fetchRamiCatalog(query, {
+        url: env.GROCERY_RAMI_LEVY_CATALOG_URL || undefined,
+        store: env.RAMI_LEVY_STORE || '412',
+        userAgent: env.RAMI_LEVY_USER_AGENT,
+        cookie: env.RAMI_LEVY_COOKIE,
+      });
+      return normalizeRamiCatalog(data).slice(0, limit);
+    },
+  };
+}
 
 export function createStores(env = process.env) {
   const ids = (env.GROCERY_STORES || Object.keys(STORE_DEFS).join(','))
@@ -51,7 +70,7 @@ export function createStores(env = process.env) {
       id,
       label: def.label,
       toolPrefix: def.toolPrefix,
-      search: def.search,
+      search: searchFor(def, env),
       annotations: def.annotations,
       command: process.execPath,
       args: [entry],

@@ -8,7 +8,9 @@ export const SEARCH_TOOL = {
     'Search Shufersal and Rami Levy at once. The catalogs are in Hebrew: use Hebrew requests as written, and translate Russian or English ones ' +
     'into a Hebrew query first (молоко / milk → חלב). Retry with a simpler Hebrew term if nothing is found. Returns one list sorted by price per liter or kilogram, ' +
     'then price, with per-store status. A store that fails is reported in `stores` and the other store still answers. ' +
-    'Products are not matched across stores: compare by name, size and pricePerUnit, and tell the user which items you treat as equivalent.',
+    'Items with the same barcode in different stores are the same product and are grouped in `sameProduct` with the cheapest store; ' +
+    'compare other items by name, size and pricePerUnit and say which you treat as equivalent. ' +
+    '`promotions` lists multi-buy and club offers (unitPrice is the price per item under the offer); mention them when they change which store is cheaper.',
   annotations: { readOnlyHint: true, openWorldHint: true },
   inputSchema: {
     type: 'object',
@@ -36,11 +38,13 @@ export async function searchAllStores(stores, args = {}, { timeoutMs = 45_000 } 
 
   const outcomes = await Promise.allSettled(
     selected.map(async (store) => {
-      const { tool, maxLimit, normalize } = store.search;
+      const { tool, maxLimit, normalize, run } = store.search;
+      const timeoutMessage = `${store.label} did not answer within ${timeoutMs / 1000}s`;
+      if (run) return withTimeout(run({ query, limit: Math.min(limit, maxLimit) }), timeoutMs, timeoutMessage);
       const result = await withTimeout(
         store.callTool(tool, { query, limit: Math.min(limit, maxLimit) }, timeoutMs),
         timeoutMs + 1_000,
-        `${store.label} did not answer within ${timeoutMs / 1000}s`,
+        timeoutMessage,
       );
       const text = (result.content ?? []).filter((c) => c.type === 'text').map((c) => c.text).join('\n');
       if (result.isError) throw new StoreError(text.slice(0, 500) || `${store.label} reported an error`);
@@ -61,5 +65,34 @@ export async function searchAllStores(stores, args = {}, { timeoutMs = 45_000 } 
     }
   });
   results.sort(compareItems);
-  return { query, stores: status, results };
+  return { query, stores: status, sameProduct: groupByBarcode(results), results };
+}
+
+/** Products sold by more than one store, matched by barcode, cheapest first within each group. */
+export function groupByBarcode(results) {
+  const groups = new Map();
+  for (const r of results) {
+    if (!r.barcode || r.price == null) continue;
+    if (!groups.has(r.barcode)) groups.set(r.barcode, []);
+    groups.get(r.barcode).push(r);
+  }
+  return [...groups.values()]
+    .filter((offers) => new Set(offers.map((o) => o.store)).size > 1)
+    .map((offers) => {
+      offers.sort((a, b) => a.price - b.price);
+      const [cheapest, ...rest] = offers;
+      return {
+        barcode: cheapest.barcode,
+        name: offers.find((o) => o.store === 'shufersal')?.name ?? cheapest.name,
+        offers: offers.map((o) => ({
+          store: o.store,
+          productId: o.productId,
+          price: o.price,
+          ...(o.promotions ? { promotions: o.promotions } : {}),
+        })),
+        cheapestStore: rest.some((o) => o.price === cheapest.price) ? null : cheapest.store,
+        priceDifference: Math.round((offers.at(-1).price - cheapest.price) * 100) / 100,
+      };
+    })
+    .sort((a, b) => b.priceDifference - a.priceDifference);
 }

@@ -67,7 +67,7 @@ test('searchAllStores keeps one store\'s results when the other fails or hangs',
 });
 
 async function startGrocery(env) {
-  const transport = new StdioClientTransport({ command: process.execPath, args: [INDEX], env: { ...process.env, ...env }, stderr: 'pipe' });
+  const transport = new StdioClientTransport({ command: process.execPath, args: [INDEX], env: { ...process.env, GROCERY_RAMI_LEVY_SEARCH: 'adapter', ...env }, stderr: 'pipe' });
   transport.stderr?.resume();
   const client = new Client({ name: 'test', version: '0' });
   cleanup.push(() => client.close());
@@ -120,7 +120,7 @@ test('the grocery server still serves when one store cannot start', async () => 
 test('the grocery server exits when its client closes stdin', async () => {
   const { spawn } = await import('node:child_process');
   const child = spawn(process.execPath, [INDEX], {
-    env: { ...process.env, GROCERY_SHUFERSAL_ENTRY: fixture('fake-shufersal.js'), GROCERY_RAMI_LEVY_ENTRY: fixture('fake-rami-levy.js') },
+    env: { ...process.env, GROCERY_RAMI_LEVY_SEARCH: 'adapter', GROCERY_SHUFERSAL_ENTRY: fixture('fake-shufersal.js'), GROCERY_RAMI_LEVY_ENTRY: fixture('fake-rami-levy.js') },
     stdio: ['pipe', 'pipe', 'pipe'],
   });
   cleanup.push(() => child.kill('SIGKILL'));

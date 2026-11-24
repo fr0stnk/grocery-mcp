@@ -11,7 +11,7 @@ if (mode === 'fail') {
 
 const searchTool = mode === 'rami-levy' ? 'rami_levy_search_products' : 'search_products';
 const results = {
-  shufersal: [{ code: 'P_1', name: 'חלב 3%', brand: 'טרה', unit: '2 ליטר', price: '14.70 ₪', inStock: true, sellingMethod: 'BY_UNIT' }],
+  shufersal: [{ code: 'P_7290102398065', name: 'חלב 3%', brand: 'טרה', unit: '2 ליטר', price: '14.70 ₪', inStock: true, sellingMethod: 'BY_UNIT' }],
   'rami-levy': { ok: true, results: [{ productId: '419939', name: 'חלב טרי 3% 1 ליטר רמי לוי', price: 7.1 }] },
 };
 

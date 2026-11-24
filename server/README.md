@@ -28,12 +28,25 @@ It returns JSON text like this:
   "query": "חלב 3%",
   "stores": {
     "shufersal": { "ok": true, "count": 5 },
-    "rami-levy": { "ok": false, "error": "Rami Levy failed to start: rami-levy-mcp: missing required env var RAMI_LEVY_BEARER_TOKEN" }
+    "rami-levy": { "ok": true, "count": 5 }
   },
+  "sameProduct": [
+    {
+      "barcode": "7290102398065",
+      "name": "חלב 3% בקרטון מהדרין",
+      "offers": [
+        { "store": "shufersal", "productId": "P_7290102398065", "price": 14.7 },
+        { "store": "rami-levy", "productId": "329258", "price": 14.9 }
+      ],
+      "cheapestStore": "shufersal",
+      "priceDifference": 0.2
+    }
+  ],
   "results": [
     {
       "store": "shufersal",
       "productId": "P_4131074",
+      "barcode": null,
       "name": "חלב בקרטון 3% שומן",
       "brand": "תנובה",
       "size": "1 L",
@@ -48,9 +61,12 @@ It returns JSON text like this:
 
 - Results are sorted by `pricePerUnit`, then by `price`. Items without a unit price come last.
 - `size` is read from Shufersal's unit field, or else from the product name, for example `2 ליטר`, `1 ל'`, `6*200 מ"ל` or `500 גרם`. It is always shown in liters or kilograms. `null` means the size could not be read, and no value is guessed.
-- Items sold by weight carry `"soldByWeight": true` and have no unit price, because their price does not follow from the pack size.
-- `brand` and `inStock` are `null` for Rami Levy, because its search does not return them.
-- Products are not matched across stores. The Rami Levy integration returns its own product IDs, not barcodes. The server instructions ask the client to compare by name, size and unit price, and to say which items it treats as equivalent.
+- `barcode` is the retail barcode (EAN-8, UPC-A, EAN-13 or GTIN-14). Shufersal's `P_<digits>` codes and Rami Levy's catalog both carry it. Internal codes, such as produce PLUs, give `null`.
+- `sameProduct` groups items with the same barcode in more than one store. Each group lists the offers cheapest first, with `cheapestStore` (or `null` on a tie) and `priceDifference`. Groups are sorted by the largest difference first. Other items are not matched, and the server instructions ask the client to compare them by name, size and unit price.
+- `promotions` appears on Rami Levy items with offers. Each one has `text`, `quantity` and `price` (for example 4 for ₪10), a per-item `unitPrice` under the offer, the `until` date, and `clubOnly` and `personal` flags.
+- Items sold by weight carry `"soldByWeight": true`. Rami Levy prices them per kilogram, so their `pricePerUnit` is that price per `kg`. Shufersal's weighed items have no unit price, because the meaning of their price is not confirmed.
+- `brand` and `inStock` are `null` for Rami Levy. Its catalog returns only a numeric brand ID and no stock flag.
+- Rami Levy is searched through its public catalog API (`src/rami-catalog.js`), which needs no login. The adapter's search drops barcodes and promotions, and catalog search keeps working when the adapter's tokens have expired. Carts and orders still go through the adapter. The search uses `RAMI_LEVY_STORE`, `RAMI_LEVY_USER_AGENT` and `RAMI_LEVY_COOKIE` when set.
 - A store that fails, returns an error or takes more than 45 seconds is reported in `stores`. The other store's results are still returned.
 
 ### Language
@@ -99,6 +115,8 @@ The adapters read their own variables, listed in the root `.env.example`. The se
 | `GROCERY_STORES` | `shufersal,rami-levy` | Stores to run, comma-separated |
 | `GROCERY_SHUFERSAL_ENTRY` | `upstream/shufersal-cart/bin/shufersal-mcp.mjs` | Shufersal adapter entry point, relative to the repository root |
 | `GROCERY_RAMI_LEVY_ENTRY` | `upstream/rami-levy-mcp/dist/index.js` | Rami Levy adapter entry point, relative to the repository root |
+| `GROCERY_RAMI_LEVY_SEARCH` | catalog | Set to `adapter` to search Rami Levy through the adapter's tool instead of its catalog API |
+| `GROCERY_RAMI_LEVY_CATALOG_URL` | Rami Levy's catalog API | Catalog endpoint override, used by the tests |
 | `GROCERY_HTTP` | unset, which means stdio | Serve Streamable HTTP on `port` or `host:port`. The host defaults to `127.0.0.1`. |
 | `GROCERY_READ_ONLY` | off | When `1`, only tools annotated `readOnlyHint` are listed, and other forwarded tools are refused. `search_all_stores` always works. |
 
@@ -128,8 +146,8 @@ npm test
 
 The tests use stand-in adapters from `test/fixtures/`, so they need no credentials or network access:
 
-- `normalize.test.js` covers size and price parsing, both stores' result shapes, error reporting and sorting. The cases come from live search results.
-- `http.test.js` runs the server in HTTP mode with stdin closed. It covers listing tools and annotations, search, two clients sharing one store process, 404, 405, 400 and a foreign `Host` header, and read-only mode.
+- `normalize.test.js` covers size, price, barcode and promotion parsing, both stores' result shapes, weighed items, error reporting, sorting and barcode grouping. The cases come from live search results.
+- `http.test.js` runs the server in HTTP mode with stdin closed. It also checks catalog search against a local stand-in for the catalog API, including the store and User-Agent sent and the barcode pairing. It covers listing tools and annotations, search, two clients sharing one store process, 404, 405, 400 and a foreign `Host` header, and read-only mode.
 - `server.test.js` starts real child processes. It covers startup failure messages, restart after an adapter exits, partial results when one store fails or hangs, tool forwarding and prefixes, instruction pass-through, and exit when stdin closes.
 
 ## Files
@@ -142,7 +160,8 @@ The tests use stand-in adapters from `test/fixtures/`, so they need no credentia
 | `src/config.js` | Store definitions and adapter entry points |
 | `src/stores.js` | `StoreClient`: one adapter process, with startup, restart and stderr capture |
 | `src/search.js` | `search_all_stores`: definition, parallel search and per-store status |
-| `src/normalize.js` | Converts each store's results to the shared shape, and parses sizes and prices |
+| `src/normalize.js` | Converts each store's results to the shared shape, and parses sizes, prices, barcodes and promotions |
+| `src/rami-catalog.js` | Client for Rami Levy's public catalog search |
 
 `src/app.js` uses the SDK's low-level `Server` class instead of `McpServer`. Forwarded tools keep their JSON Schemas, which `McpServer`'s zod-based registration cannot take.
 

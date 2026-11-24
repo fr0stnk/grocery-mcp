@@ -101,7 +101,7 @@ RAMI_LEVY_COOKIE='cf_clearance=AbC...; _ga=GA1.1...; other=value'
 
 ## Tools
 
-- `search_all_stores` searches both stores at once. Results are sorted by price per liter or kilogram, then by price, and each store's status is reported. If one store fails, the other store's results are still returned. Products are not matched across stores, because the Rami Levy integration does not return barcodes.
+- `search_all_stores` searches both stores at once. Results are sorted by price per liter or kilogram, then by price, and each store's status is reported. If one store fails, the other store's results are still returned. Products with the same barcode in both stores are paired, with the cheaper store named. Rami Levy promotions, such as multi-buy offers, are included.
 - Each store's own tools are forwarded with a store prefix, such as `shufersal_view_cart` and `rami_levy_add_item`. Carts are separate per store, and no tool checks out or pays.
 
 A store that cannot start, for example because its credentials are missing, is reported in search results. The other store keeps working. To run only one store, set `GROCERY_STORES` to `shufersal` or `rami-levy`.
