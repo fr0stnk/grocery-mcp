@@ -47,10 +47,17 @@ export async function searchStore(store, query, { timeoutMs = 45_000, cache = se
 }
 
 async function fetchStore(store, query, timeoutMs) {
-  const { tool, maxLimit, normalize, run } = store.search;
+  const { maxLimit, run } = store.search;
   const limit = Math.min(FETCH_SIZE, maxLimit);
   const timeoutMessage = `${store.label} did not answer within ${timeoutMs / 1000}s`;
-  if (run) return withTimeout(run({ query, limit }), timeoutMs, timeoutMessage);
+  const viaAdapter = () => adapterSearch(store, query, limit, timeoutMs, timeoutMessage);
+  if (run) return withTimeout(run({ query, limit, fallback: viaAdapter }), timeoutMs, timeoutMessage);
+  return viaAdapter();
+}
+
+/** Searches through the adapter's own search tool. */
+async function adapterSearch(store, query, limit, timeoutMs, timeoutMessage) {
+  const { tool, normalize } = store.search;
   const result = await withTimeout(store.callTool(tool, { query, limit }, timeoutMs), timeoutMs + 1_000, timeoutMessage);
   const text = (result.content ?? []).filter((c) => c.type === 'text').map((c) => c.text).join('\n');
   if (result.isError) throw new StoreError(text.slice(0, 500) || `${store.label} reported an error`);

@@ -109,7 +109,7 @@ RAMI_LEVY_COOKIE='cf_clearance=AbC...; _ga=GA1.1...; other=value'
 
 ## Tools
 
-- `search_all_stores` searches both stores at once. Results are sorted by price per liter or kilogram, then by price, and each store's status is reported. If one store fails, the other store's results are still returned. Products with the same barcode in both stores are paired, with the cheaper store named. Rami Levy promotions, such as multi-buy offers, are included.
+- `search_all_stores` searches both stores at once. Results are sorted by price per liter or kilogram, then by price, and each store's status is reported. If one store fails, the other store's results are still returned. Products with the same barcode in both stores are paired, with the cheaper store named. Both stores' promotions, such as multi-buy offers, are included, along with stock.
 - `compare_basket` prices a whole shopping list in both stores. It prefers identical products by barcode and applies Rami Levy multi-buy promotions. It returns each store's total and missing items, a fair comparison over items both stores have, and the total if the order is split. Searches are cached for 15 minutes, and recent prices are used if a store is briefly unavailable.
 - `add_basket_to_cart` adds the chosen store's basket to its real cart in one step, with a dry-run preview. Nothing is ordered or paid.
 - `account_status` checks both store logins live and shows when the Rami Levy token expires. Search and basket results carry `accountWarnings` from a week before expiry, or after a failed login, so the assistant tells you in the conversation.

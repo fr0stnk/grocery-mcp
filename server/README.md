@@ -63,9 +63,10 @@ It returns JSON text like this:
 - `size` is read from Shufersal's unit field, or else from the product name, for example `2 ליטר`, `1 ל'`, `6*200 מ"ל` or `500 גרם`. It is always shown in liters or kilograms. `null` means the size could not be read, and no value is guessed.
 - `barcode` is the retail barcode (EAN-8, UPC-A, EAN-13 or GTIN-14). Shufersal's `P_<digits>` codes and Rami Levy's catalog both carry it. Internal codes, such as produce PLUs, give `null`.
 - `sameProduct` groups items with the same barcode in more than one store. Each group lists the offers cheapest first, with `cheapestStore` (or `null` on a tie) and `priceDifference`. Groups are sorted by the largest difference first. Other items are not matched, and the server instructions ask the client to compare them by name, size and unit price.
-- `promotions` appears on Rami Levy items with offers. Each one has `text`, `quantity` and `price` (for example 4 for ₪10), a per-item `unitPrice` under the offer, the `until` date, and `clubOnly` and `personal` flags.
+- `promotions` appears on items with offers from either store. Rami Levy's come from its catalog's `sale` records. Shufersal's come from its `promotionMsg` text, such as `3 יח' ב- 15 ₪`; multi-buy wording is parsed into quantity and price, and other wording is kept as `text` only. Each one has `text`, `quantity` and `price` (for example 4 for ₪10), a per-item `unitPrice` under the offer, the `until` date, and `clubOnly` and `personal` flags.
 - Items sold by weight carry `"soldByWeight": true`. Rami Levy prices them per kilogram, so their `pricePerUnit` is that price per `kg`. Shufersal's weighed items have no unit price, because the meaning of their price is not confirmed.
-- `brand` and `inStock` are `null` for Rami Levy. Its catalog returns only a numeric brand ID and no stock flag.
+- `inStock` comes from Shufersal's stock status. For Rami Levy it is true when the configured branch is in the product's `available_in` list. Rami Levy's search already returns only products sold at that branch, so it is almost always true. `brand` is `null` for Rami Levy, whose catalog returns only a numeric brand ID.
+- Shufersal is searched directly at `/online/he/search/results` (`src/shufersal-search.js`). The search uses the adapter's saved session cookies, which it reads but never writes, so the adapter remains the only process that manages the login. The adapter's own search drops the barcode, stock and promotions. If the direct search fails, for example because the session file is missing or the site answers with a login page, the server logs why and uses the adapter's search tool instead. When a product's size cannot be read from its text, Shufersal's own comparison price, such as ₪1.58 per 100 g, fills in `pricePerUnit`.
 - Rami Levy is searched through its public catalog API (`src/rami-catalog.js`), which needs no login. The adapter's search drops barcodes and promotions, and catalog search keeps working when the adapter's tokens have expired. Carts and orders still go through the adapter. The search uses `RAMI_LEVY_STORE`, `RAMI_LEVY_USER_AGENT` and `RAMI_LEVY_COOKIE` when set.
 - A store that fails, returns an error or takes more than 45 seconds is reported in `stores`. The other store's results are still returned.
 
@@ -192,6 +193,7 @@ With `GROCERY_HTTP=127.0.0.1:8791`, the server listens at `http://127.0.0.1:8791
 - `GET /health` returns `{"ok":true}`. Other paths return a plain-text 404, and other methods on `/mcp` return 405. The 404 is plain text because OpenAI's tunnel-client probes the `/.well-known/oauth-*` paths and tried to read a JSON 404 as OAuth metadata. Bodies are limited to 4 MiB.
 - On a loopback address, requests whose `Host` header names another host are rejected with 403, which guards against DNS rebinding.
 - It keeps running when stdin closes, so it can run as a detached service. Stdio mode exits instead.
+- A request whose `MCP-Protocol-Version` header names a version the SDK does not support gets HTTP 400, as the MCP specification requires. ChatGPT's newer `server/discover` probe is sent that way and is answered with 400, after which ChatGPT falls back to `2025-11-25` and connects normally. With a supported version, `server/discover` gets the standard JSON-RPC "Method not found". Support arrives with an SDK update, which Dependabot proposes.
 - In stateless mode, notifications such as a changed tool list are not pushed. Clients see newly started store tools the next time they list tools.
 
 `../compose.tunnel.yaml` runs this mode as the `grocery-http` service for ChatGPT. See [`../tunnel/README.md`](../tunnel/README.md).
@@ -206,6 +208,8 @@ The adapters read their own variables, listed in the root `.env.example`. The se
 | `GROCERY_SHUFERSAL_ENTRY` | `upstream/shufersal-cart/bin/shufersal-mcp.mjs` | Shufersal adapter entry point, relative to the repository root |
 | `GROCERY_RAMI_LEVY_ENTRY` | `upstream/rami-levy-mcp/dist/index.js` | Rami Levy adapter entry point, relative to the repository root |
 | `GROCERY_RAMI_LEVY_SEARCH` | catalog | Set to `adapter` to search Rami Levy through the adapter's tool instead of its catalog API |
+| `GROCERY_SHUFERSAL_SEARCH` | direct | Set to `adapter` to always search Shufersal through the adapter's tool |
+| `GROCERY_SHUFERSAL_ORIGIN` | `https://www.shufersal.co.il` | Shufersal origin override, used by the tests |
 | `GROCERY_RAMI_LEVY_CATALOG_URL` | Rami Levy's catalog API | Catalog endpoint override, used by the tests |
 | `GROCERY_DATA_DIR` | `<repo>/.data` locally, `/data/grocery` in Docker | Where `preferences.json` is kept |
 | `GROCERY_PREFERENCES_FILE` | `$GROCERY_DATA_DIR/preferences.json` | Exact preferences file, used by the tests |
@@ -242,6 +246,7 @@ The tests use stand-in adapters from `test/fixtures/`, so they need no credentia
 
 - `normalize.test.js` covers size, price, barcode and promotion parsing, both stores' result shapes, weighed items, error reporting, sorting and barcode grouping. The cases come from live search results.
 - `http.test.js` runs the server in HTTP mode with stdin closed. It also checks catalog search against a local stand-in for the catalog API, including the store and User-Agent sent and the barcode pairing. It covers listing tools and annotations, search, two clients sharing one store process, 404, 405, 400 and a foreign `Host` header, and read-only mode.
+- `shufersal-search.test.js` covers cookie matching (domain, path, expiry, secure), the direct search against a local stand-in, raw result mapping, promotion parsing, Rami Levy branch stock, and falling back to the adapter.
 - `accounts.test.js` covers token expiry, warning thresholds, which errors count as login failures, and live status checks for healthy, logged-out, failing and hung stores. `http.test.js` also runs `account_status` and the warnings end to end, and runs the bridge with a stdio client, including exit on disconnect and an unreachable server.
 - `preferences.test.js` and `order.test.js` cover preference storage, validation and resolution into baskets, and both stores' cart paths, including failures, the time budget and dry runs.
 - `basket.test.js` covers the cache (TTL, stale fallback, merged loads), the concurrency limiter, match selection, promotion pricing, basket totals and a failing store.
@@ -266,6 +271,7 @@ The tests use stand-in adapters from `test/fixtures/`, so they need no credentia
 | `src/version.js` | Reads the version from `package.json` |
 | `src/cache.js` | Search cache with stale fallback, and the per-store concurrency limiter |
 | `src/normalize.js` | Converts each store's results to the shared shape, and parses sizes, prices, barcodes and promotions |
+| `src/shufersal-search.js` | Direct Shufersal search with the adapter's saved session, read-only |
 | `src/rami-catalog.js` | Client for Rami Levy's public catalog search |
 
 `src/app.js` uses the SDK's low-level `Server` class instead of `McpServer`. Forwarded tools keep their JSON Schemas, which `McpServer`'s zod-based registration cannot take.

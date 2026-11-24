@@ -1,7 +1,8 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { normalizeRamiCatalog, normalizeRamiLevy, normalizeShufersal } from './normalize.js';
+import { normalizeRamiCatalog, normalizeRamiLevy, normalizeShufersal, normalizeShufersalRaw } from './normalize.js';
 import { fetchRamiCatalog } from './rami-catalog.js';
+import { fetchShufersalSearch } from './shufersal-search.js';
 import { StoreClient } from './stores.js';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -14,7 +15,10 @@ export const STORE_DEFS = {
     toolPrefix: 'shufersal_',
     entryEnv: 'GROCERY_SHUFERSAL_ENTRY',
     entry: 'upstream/shufersal-cart/bin/shufersal-mcp.mjs',
-    search: { tool: 'search_products', maxLimit: 20, normalize: normalizeShufersal },
+    // Reads Shufersal's raw results with the adapter's saved session (barcode, stock,
+    // promotions) and falls back to the adapter's search tool if that fails;
+    // GROCERY_SHUFERSAL_SEARCH=adapter always uses the tool.
+    search: { tool: 'search_products', maxLimit: 20, normalize: normalizeShufersal, direct: true },
   },
   'rami-levy': {
     label: 'Rami Levy',
@@ -40,17 +44,32 @@ export const STORE_DEFS = {
 };
 
 function searchFor(def, env) {
+  if (def.search.direct && env.GROCERY_SHUFERSAL_SEARCH !== 'adapter') {
+    return {
+      ...def.search,
+      run: async ({ query, limit, fallback }) => {
+        try {
+          const results = await fetchShufersalSearch(query, { cookieFile: env.SHUFERSAL_COOKIE_FILE, limit, origin: env.GROCERY_SHUFERSAL_ORIGIN || undefined });
+          return normalizeShufersalRaw(results).slice(0, limit);
+        } catch (error) {
+          process.stderr.write(`[grocery] shufersal direct search failed (${error.message}); using the adapter's search\n`);
+          return fallback();
+        }
+      },
+    };
+  }
   if (!def.search.catalog || env.GROCERY_RAMI_LEVY_SEARCH === 'adapter') return def.search;
+  const branch = env.RAMI_LEVY_STORE || '412';
   return {
     ...def.search,
     run: async ({ query, limit }) => {
       const data = await fetchRamiCatalog(query, {
         url: env.GROCERY_RAMI_LEVY_CATALOG_URL || undefined,
-        store: env.RAMI_LEVY_STORE || '412',
+        store: branch,
         userAgent: env.RAMI_LEVY_USER_AGENT,
         cookie: env.RAMI_LEVY_COOKIE,
       });
-      return normalizeRamiCatalog(data).slice(0, limit);
+      return normalizeRamiCatalog(data, { branch }).slice(0, limit);
     },
   };
 }

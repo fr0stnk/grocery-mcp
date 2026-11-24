@@ -141,8 +141,54 @@ export function parsePromotions(sale) {
     .filter((s) => s.text);
 }
 
-/** Rami Levy's public catalog API: { data: [{ id, barcode, name, price: { price }, prop: { by_kilo }, sale: [...] }] }. */
-export function normalizeRamiCatalog(data) {
+/** Shufersal's promotion text, such as "3 יח'  ב- 15 ₪" (3 units for 15); other wordings keep only the text. */
+export function parseShufersalPromotion(message) {
+  if (typeof message !== 'string' || !message.trim()) return [];
+  const text = message.replace(/\s+/g, ' ').trim();
+  const m = /(\d+)\s*יח'?\s*ב\s*-?\s*(\d+(?:\.\d+)?)\s*₪/u.exec(text);
+  const quantity = m ? Number(m[1]) : null;
+  const price = m ? Number(m[2]) : null;
+  return [{ text, quantity, price, unitPrice: quantity && price ? round(price / quantity) : null, until: null, clubOnly: /מועדון/u.test(text), personal: false }];
+}
+
+// Shufersal compares prices per valueForComparison of these units, e.g. per 100 גרם.
+const COMPARISON_UNITS = { 'גרם': ['kg', 1000], 'ג': ['kg', 1000], 'ק"ג': ['kg', 1], 'קג': ['kg', 1], 'מ"ל': ['L', 1000], 'מל': ['L', 1000], 'ליטר': ['L', 1], 'ל': ['L', 1] };
+
+function officialUnitPrice(p) {
+  const value = Number(p.pricePerUnit?.value);
+  const per = Number(p.valueForComparison);
+  const unit = COMPARISON_UNITS[String(p.unitForComparison ?? '').replace(/[״]/g, '"').trim()];
+  if (!(value > 0 && per > 0 && unit)) return null;
+  return { pricePerUnit: round((value * unit[1]) / per), perUnit: unit[0] };
+}
+
+/** Shufersal's raw search results, read directly: barcode, stock, brand, size and promotions. */
+export function normalizeShufersalRaw(results) {
+  if (!Array.isArray(results)) throw new StoreError('shufersal: search response has no results array');
+  return results
+    .filter((p) => p && p.code)
+    .map((p) => {
+      const method = typeof p.sellingMethod === 'string' ? p.sellingMethod : p.sellingMethod?.code;
+      const stock = p.stock?.stockLevelStatus?.code;
+      const normalized = item('shufersal', {
+        productId: p.code,
+        barcode: barcodeOf(p.ean ?? p.sku ?? p.code),
+        name: p.name,
+        brand: p.brandName,
+        sizeText: p.unitDescription,
+        price: p.price?.value,
+        inStock: stock ? stock !== 'outOfStock' : null,
+        byWeight: Boolean(method) && method !== 'BY_UNIT',
+        promotions: parseShufersalPromotion(p.promotionMsg),
+      });
+      // When the size cannot be read from the text, use the store's own comparison price.
+      if (normalized.pricePerUnit == null && !normalized.soldByWeight) Object.assign(normalized, officialUnitPrice(p) ?? {});
+      return normalized;
+    });
+}
+
+/** Rami Levy's public catalog API: { data: [{ id, barcode, name, price: { price }, prop: { by_kilo }, sale: [...], available_in: [branch ids] }] }. */
+export function normalizeRamiCatalog(data, { branch } = {}) {
   if (!data || !Array.isArray(data.data)) throw new StoreError('rami-levy: catalog response has no data array');
   return data.data.map((p) =>
     item('rami-levy', {
@@ -153,6 +199,7 @@ export function normalizeRamiCatalog(data) {
       byWeight: Number(p.prop?.by_kilo) === 1,
       pricedPerKg: true,
       promotions: parsePromotions(p.sale),
+      inStock: branch && Array.isArray(p.available_in) ? p.available_in.map(String).includes(String(branch)) : null,
     }),
   );
 }
