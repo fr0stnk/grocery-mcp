@@ -69,6 +69,44 @@ It returns JSON text like this:
 - Rami Levy is searched through its public catalog API (`src/rami-catalog.js`), which needs no login. The adapter's search drops barcodes and promotions, and catalog search keeps working when the adapter's tokens have expired. Carts and orders still go through the adapter. The search uses `RAMI_LEVY_STORE`, `RAMI_LEVY_USER_AGENT` and `RAMI_LEVY_COOKIE` when set.
 - A store that fails, returns an error or takes more than 45 seconds is reported in `stores`. The other store's results are still returned.
 
+### `compare_basket`
+
+This tool prices a whole shopping list in every configured store.
+
+| Argument | Type | Meaning |
+|---|---|---|
+| `items` | 1–40 of `{ query, quantity?, barcode? }` | Hebrew search terms per item. The quantity defaults to 1 and is in kilograms for weighed items. `barcode` pins an exact product. |
+| `stores` | array of `shufersal`, `rami-levy` | Compare only these stores |
+
+For each item it chooses one product per store:
+
+1. With a pinned `barcode`, only that exact product counts.
+2. Otherwise, a barcode sold in **every** store wins, preferring the one ranked highest by the stores' own relevance. The match is `identical: true`.
+3. Otherwise, each store's most relevant in-stock result is used, with `identical: false`, and the client is asked to point out that the products differ.
+
+Each offer's `lineTotal` is price × quantity. The cheapest qualifying Rami Levy multi-buy promotion is applied and named in `promotion`. Club-only and personal offers are shown as `clubOffer` but not applied.
+
+The result contains:
+
+- `items`: each item's chosen offers per store, with `cheapestStore`.
+- `totals`: each store's total, the number of items found and the `missing` queries.
+- `comparable`: totals over only the items every store has, with `cheaperStore` and `difference`. This is the fair comparison.
+- `split`: the total when every item is bought where it is cheapest, and `savingsOnCommonItems` against the cheapest single store.
+- `notes`: delivery fees and minimum orders are excluded, weighed quantities are in kilograms, and some prices may be stale.
+
+A store that fails is reported in `stores`, and the other store is still priced.
+
+### Search cache
+
+`search_all_stores` and `compare_basket` share an in-memory cache (`src/cache.js`), keyed by store, Rami Levy branch and query:
+
+- Each store is asked for a fixed batch of up to 20 results, so a cached search serves any `limit`.
+- Results are reused for 15 minutes.
+- If a fresh fetch fails, results up to 24 hours old are returned with `stale: true` and `fetchedAt`, instead of an error.
+- Concurrent identical searches share one fetch, and each store runs at most 4 searches at once.
+- Carts, orders and status are never cached.
+- Each store's status includes `fetchedAt`, plus `cached: true` when the result came from the cache.
+
 ### Language
 
 Users may write in Hebrew, Russian or English, while both catalogs are in Hebrew. The server instructions and the `search_all_stores` description tell the client to:
@@ -148,6 +186,7 @@ The tests use stand-in adapters from `test/fixtures/`, so they need no credentia
 
 - `normalize.test.js` covers size, price, barcode and promotion parsing, both stores' result shapes, weighed items, error reporting, sorting and barcode grouping. The cases come from live search results.
 - `http.test.js` runs the server in HTTP mode with stdin closed. It also checks catalog search against a local stand-in for the catalog API, including the store and User-Agent sent and the barcode pairing. It covers listing tools and annotations, search, two clients sharing one store process, 404, 405, 400 and a foreign `Host` header, and read-only mode.
+- `basket.test.js` covers the cache (TTL, stale fallback, merged loads), the concurrency limiter, match selection, promotion pricing, basket totals and a failing store.
 - `server.test.js` starts real child processes. It covers startup failure messages, restart after an adapter exits, partial results when one store fails or hangs, tool forwarding and prefixes, instruction pass-through, and exit when stdin closes.
 
 ## Files
@@ -159,7 +198,9 @@ The tests use stand-in adapters from `test/fixtures/`, so they need no credentia
 | `src/http.js` | Stateless Streamable HTTP listener with health check, body limit and Host check |
 | `src/config.js` | Store definitions and adapter entry points |
 | `src/stores.js` | `StoreClient`: one adapter process, with startup, restart and stderr capture |
-| `src/search.js` | `search_all_stores`: definition, parallel search and per-store status |
+| `src/search.js` | `search_all_stores`, per-store cached search and barcode grouping |
+| `src/basket.js` | `compare_basket`: match selection, promotion pricing and totals |
+| `src/cache.js` | Search cache with stale fallback, and the per-store concurrency limiter |
 | `src/normalize.js` | Converts each store's results to the shared shape, and parses sizes, prices, barcodes and promotions |
 | `src/rami-catalog.js` | Client for Rami Levy's public catalog search |
 

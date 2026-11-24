@@ -101,7 +101,7 @@ test('read-only mode lists only read tools and refuses writes', async () => {
   const { url } = await startHttp({ GROCERY_READ_ONLY: '1' });
   const client = await connect(url);
   const names = (await client.listTools()).tools.map((t) => t.name).sort();
-  assert.deepEqual(names, ['rami_levy_search_products', 'rami_levy_view_cart', 'search_all_stores']);
+  assert.deepEqual(names, ['compare_basket', 'rami_levy_search_products', 'rami_levy_view_cart', 'search_all_stores']);
   assert.match(client.getInstructions(), /read-only/);
 
   const refused = await client.callTool({ name: 'shufersal_view_cart', arguments: {} });
@@ -153,4 +153,11 @@ test('Rami Levy search uses the catalog and pairs barcodes with Shufersal', asyn
   assert.equal(out.sameProduct.length, 1);
   assert.equal(out.sameProduct[0].cheapestStore, 'shufersal');
   assert.equal(out.sameProduct[0].offers[1].promotions[0].unitPrice, 12.5);
+
+  const basket = JSON.parse((await client.callTool({ name: 'compare_basket', arguments: { items: [{ query: 'חלב', quantity: 2 }] } })).content[0].text);
+  assert.equal(basket.items[0].identical, true);
+  assert.deepEqual([basket.items[0].offers.shufersal.lineTotal, basket.items[0].offers['rami-levy'].lineTotal, basket.items[0].offers['rami-levy'].promotion], [29.4, 25, '2 ב-25']);
+  assert.equal(basket.comparable.cheaperStore, 'rami-levy');
+  assert.equal(basket.stores['rami-levy'].cached, true, 'the earlier search for the same query was reused');
+  assert.equal(requests.length, 1);
 });

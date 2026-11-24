@@ -4,6 +4,7 @@ import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { SearchCache } from '../src/cache.js';
 import { searchAllStores } from '../src/search.js';
 import { StoreClient } from '../src/stores.js';
 import { normalizeRamiLevy } from '../src/normalize.js';
@@ -49,21 +50,22 @@ test('searchAllStores keeps one store\'s results when the other fails or hangs',
     id: 'rami-levy', label: 'Rami Levy',
     search: { tool: 't', maxLimit: 50, normalize: normalizeRamiLevy },
     callTool: async (_t, args) => {
-      assert.deepEqual(args, { query: 'חלב', limit: 5 });
+      assert.deepEqual(args, { query: 'חלב', limit: 20 }, 'stores are asked for a fixed batch, so cached results serve any limit');
       return { content: [{ type: 'text', text: JSON.stringify({ ok: true, results: [{ productId: '1', name: 'חלב 1 ליטר', price: 7 }] }) }] };
     },
   };
   const broken = { id: 'shufersal', label: 'Shufersal', search: { tool: 't', maxLimit: 20 }, callTool: async () => ({ isError: true, content: [{ type: 'text', text: 'login required' }] }) };
   const hung = { id: 'slow', label: 'Slow', search: { tool: 't', maxLimit: 20 }, callTool: () => new Promise(() => {}) };
 
-  const out = await searchAllStores([ok, broken, hung], { query: ' חלב ', limit: 5 }, { timeoutMs: 200 });
+  const out = await searchAllStores([ok, broken, hung], { query: ' חלב ', limit: 5 }, { timeoutMs: 200, cache: new SearchCache() });
   assert.equal(out.query, 'חלב');
-  assert.deepEqual(out.stores['rami-levy'], { ok: true, count: 1 });
+  assert.deepEqual([out.stores['rami-levy'].ok, out.stores['rami-levy'].count, out.stores['rami-levy'].cached], [true, 1, undefined]);
+  assert.match(out.stores['rami-levy'].fetchedAt, /^\d{4}-\d\d-\d\dT/);
   assert.deepEqual(out.stores.shufersal, { ok: false, error: 'login required' });
   assert.match(out.stores.slow.error, /did not answer/);
   assert.equal(out.results.length, 1);
-  await assert.rejects(searchAllStores([ok], { query: '  ' }), /query is required/);
-  await assert.rejects(searchAllStores([ok], { query: 'x', stores: ['nope'] }), /No configured store/);
+  await assert.rejects(searchAllStores([ok], { query: '  ' }, { cache: new SearchCache() }), /query is required/);
+  await assert.rejects(searchAllStores([ok], { query: 'x', stores: ['nope'] }, { cache: new SearchCache() }), /No configured store/);
 });
 
 async function startGrocery(env) {
@@ -95,7 +97,7 @@ test('the grocery server forwards store tools and merges search', async () => {
   assert.equal(JSON.parse(cart.content[0].text).tool, 'rami_levy_view_cart');
 
   const search = JSON.parse((await client.callTool({ name: 'search_all_stores', arguments: { query: 'חלב' } })).content[0].text);
-  assert.deepEqual(search.stores, { shufersal: { ok: true, count: 1 }, 'rami-levy': { ok: true, count: 1 } });
+  assert.deepEqual(Object.fromEntries(Object.entries(search.stores).map(([k, v]) => [k, [v.ok, v.count]])), { shufersal: [true, 1], 'rami-levy': [true, 1] });
   assert.deepEqual(search.results.map((r) => [r.store, r.pricePerUnit]), [['rami-levy', 7.1], ['shufersal', 7.35]]);
 
   const unknown = await client.callTool({ name: 'nope', arguments: {} });
@@ -112,7 +114,7 @@ test('the grocery server still serves when one store cannot start', async () => 
   assert.ok(!names.some((n) => n.startsWith('rami_levy_')));
 
   const search = JSON.parse((await client.callTool({ name: 'search_all_stores', arguments: { query: 'חלב' } })).content[0].text);
-  assert.deepEqual(search.stores.shufersal, { ok: true, count: 1 });
+  assert.deepEqual([search.stores.shufersal.ok, search.stores.shufersal.count], [true, 1]);
   assert.equal(search.stores['rami-levy'].ok, false);
   assert.match(search.stores['rami-levy'].error, /missing required env var FAKE_TOKEN/);
 });

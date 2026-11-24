@@ -71,6 +71,8 @@ export function createStores(env = process.env) {
       label: def.label,
       toolPrefix: def.toolPrefix,
       search: searchFor(def, env),
+      // Rami Levy prices depend on the branch, so the branch is part of the cache key.
+      cacheKey: id === 'rami-levy' ? env.RAMI_LEVY_STORE || '412' : '',
       annotations: def.annotations,
       command: process.execPath,
       args: [entry],
