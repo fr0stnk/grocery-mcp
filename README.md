@@ -113,7 +113,7 @@ To use a single store's server without the combined server, run `docker compose 
 
 ## Images and CI
 
-[`.github/workflows/images.yml`](.github/workflows/images.yml) runs on every push and pull request:
+[`.github/workflows/images.yml`](.github/workflows/images.yml) runs on pushes and pull requests that change the `Dockerfile`, `.dockerignore`, the server code, the pinned integrations or the workflow itself. Documentation, compose files and scripts do not trigger a build. Version tags and manual runs always do. Each run:
 
 1. It runs the server tests.
 2. It builds the `grocery`, `rami-levy`, `shufersal` and `tunnel` images for amd64 and arm64.
