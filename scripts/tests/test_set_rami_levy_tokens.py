@@ -116,32 +116,6 @@ class Main(unittest.TestCase):
                 tokens.main()
             self.assertIn("RAMI_LEVY_BEARER_TOKEN='opaque-token'", env.read_text())
 
-    def test_github_mode_sets_secrets_on_stdin_and_starts_a_deploy(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            source = pathlib.Path(tmp) / "request.curl"
-            source.write_text(VALID)
-            ok = mock.Mock(returncode=0, stdout="", stderr="")
-            with mock.patch("sys.argv", ["x", "--from-file", str(source), "--github"]), \
-                 mock.patch.object(tokens.subprocess, "run", return_value=ok) as run, redirect_stdout(io.StringIO()):
-                tokens.main()
-        calls = [c.args[0] for c in run.call_args_list]
-        self.assertIn(["gh", "secret", "set", "RAMI_LEVY_BEARER_TOKEN", "--env", "production"], calls)
-        self.assertEqual(calls[-1], ["gh", "workflow", "run", "deploy.yml"])
-        bearer = next(c for c in run.call_args_list if c.args[0][3] == "RAMI_LEVY_BEARER_TOKEN")
-        self.assertEqual(bearer.kwargs["input"], "opaque-token")
-        self.assertFalse(any("opaque-token" in " ".join(c.args[0]) for c in run.call_args_list))
-
-    def test_github_mode_without_deploy(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            source = pathlib.Path(tmp) / "request.curl"
-            source.write_text(VALID)
-            ok = mock.Mock(returncode=0, stdout="", stderr="")
-            with mock.patch("sys.argv", ["x", "--from-file", str(source), "--github", "staging", "--no-deploy"]), \
-                 mock.patch.object(tokens.subprocess, "run", return_value=ok) as run, redirect_stdout(io.StringIO()):
-                tokens.main()
-        calls = [c.args[0] for c in run.call_args_list]
-        self.assertTrue(all(c[:3] == ["gh", "secret", "set"] and c[-1] == "staging" for c in calls))
-
     def test_remote_write_sends_values_on_stdin_only(self):
         with tempfile.TemporaryDirectory() as tmp:
             source = pathlib.Path(tmp) / "request.curl"

@@ -21,7 +21,7 @@ def request(**overrides):
 
 class ParseRequest(unittest.TestCase):
     def test_accepts_a_release_and_drops_empty_values(self):
-        r = receiver.parse_request(json.dumps({"ref": "v1.2.3", "env": {"RAMI_LEVY_COOKIE": ""}, "tunnels": {}}))
+        r = receiver.parse_request(json.dumps({"ref": "v1.2.3", "env": {"GROCERY_STORES": ""}, "tunnels": {}}))
         self.assertEqual((r["ref"], r["image_tag"], r["env"]), ("v1.2.3", "1.2.3", {}))
         self.assertEqual(receiver.parse_request(request(ref="v1.0.0-rc.1"))["image_tag"], "1.0.0-rc.1")
 
@@ -31,6 +31,7 @@ class ParseRequest(unittest.TestCase):
             request(ref="main"): "release tag",
             request(ref="v1.0; rm -rf /"): "release tag",
             request(env={"PATH": "/tmp"}): "unknown settings: PATH",
+            request(env={"RAMI_LEVY_ECOM_TOKEN": "x"}): "unknown settings: RAMI_LEVY_ECOM_TOKEN",
             request(env={"SHUFERSAL_PASSWORD": "it's"}): "single quotes",
             request(env={"SHUFERSAL_PASSWORD": "a\nb"}): "single-line",
             request(tunnels={"other": {"id": "tunnel_x"}}): "tunnels may only be",

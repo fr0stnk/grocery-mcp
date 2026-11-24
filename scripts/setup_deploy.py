@@ -33,7 +33,8 @@ KEY_COMMENT = "grocery-mcp-deploy"
 # Tailscale assigns addresses from these ranges, so the deploy key is refused from
 # anywhere else, for example through a router port forward to the server's SSH.
 TAILNET_SOURCES = "100.64.0.0/10,fd7a:115c:a1e0::/48"
-SECRET_SETTINGS = ["SHUFERSAL_USERNAME", "SHUFERSAL_PASSWORD", "RAMI_LEVY_BEARER_TOKEN", "RAMI_LEVY_ECOM_TOKEN", "RAMI_LEVY_USER_AGENT", "RAMI_LEVY_COOKIE"]
+# Rami Levy's browser-session tokens stay on the server and are not copied.
+SECRET_SETTINGS = ["SHUFERSAL_USERNAME", "SHUFERSAL_PASSWORD"]
 VARIABLE_SETTINGS = ["RAMI_LEVY_STORE", "GROCERY_STORES", "GROCERY_READ_ONLY"]
 
 # Runs on the server: prints the current settings and tunnel credentials as JSON.

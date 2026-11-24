@@ -22,7 +22,7 @@ class SetupDeploy(unittest.TestCase):
 
     def test_plan_splits_secrets_from_variables_and_skips_empty_values(self):
         secrets, variables = setup.plan({
-            "env": {"SHUFERSAL_PASSWORD": "p", "RAMI_LEVY_COOKIE": "", "RAMI_LEVY_STORE": "412", "OTHER": "x"},
+            "env": {"SHUFERSAL_PASSWORD": "p", "RAMI_LEVY_COOKIE": "c", "RAMI_LEVY_ECOM_TOKEN": "t", "RAMI_LEVY_STORE": "412", "OTHER": "x"},
             "tunnels": {"main": {"id": "tunnel_a", "key": "sk-a"}, "extra": {"id": "tunnel_b", "key": ""}},
         })
         self.assertEqual(secrets, {"SHUFERSAL_PASSWORD": "p", "OPENAI_TUNNEL_KEY": "sk-a"})

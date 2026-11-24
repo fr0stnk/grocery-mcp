@@ -63,10 +63,6 @@ jobs:
           SSH_TARGET: ${{ vars.DEPLOY_SSH_USER }}@${{ vars.DEPLOY_SSH_HOST }}
           SHUFERSAL_USERNAME: ${{ secrets.SHUFERSAL_USERNAME }}
           SHUFERSAL_PASSWORD: ${{ secrets.SHUFERSAL_PASSWORD }}
-          RAMI_LEVY_BEARER_TOKEN: ${{ secrets.RAMI_LEVY_BEARER_TOKEN }}
-          RAMI_LEVY_ECOM_TOKEN: ${{ secrets.RAMI_LEVY_ECOM_TOKEN }}
-          RAMI_LEVY_USER_AGENT: ${{ secrets.RAMI_LEVY_USER_AGENT }}
-          RAMI_LEVY_COOKIE: ${{ secrets.RAMI_LEVY_COOKIE }}
           RAMI_LEVY_STORE: ${{ vars.RAMI_LEVY_STORE }}
           GROCERY_STORES: ${{ vars.GROCERY_STORES }}
           GROCERY_READ_ONLY: ${{ vars.GROCERY_READ_ONLY }}
@@ -82,8 +78,8 @@ jobs:
           python3 - <<'PY' | ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes -o BatchMode=yes \
             -o StrictHostKeyChecking=yes -o ConnectTimeout=30 "$SSH_TARGET"
           import json, os
-          keys = ["SHUFERSAL_USERNAME", "SHUFERSAL_PASSWORD", "RAMI_LEVY_BEARER_TOKEN", "RAMI_LEVY_ECOM_TOKEN",
-                  "RAMI_LEVY_USER_AGENT", "RAMI_LEVY_COOKIE", "RAMI_LEVY_STORE", "GROCERY_STORES", "GROCERY_READ_ONLY"]
+          # Browser-session tokens (Rami Levy) stay on the server and are renewed there.
+          keys = ["SHUFERSAL_USERNAME", "SHUFERSAL_PASSWORD", "RAMI_LEVY_STORE", "GROCERY_STORES", "GROCERY_READ_ONLY"]
           tunnels = {}
           for name in ("main", "extra"):
               tunnel_id = os.environ.get(f"TUNNEL_{name.upper()}_ID", "")

@@ -34,11 +34,9 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 from setup_openai_tunnel import CONFIG as TUNNEL_CONFIG, write_private  # noqa: E402
 
-ENV_KEYS = {
-    "SHUFERSAL_USERNAME", "SHUFERSAL_PASSWORD",
-    "RAMI_LEVY_BEARER_TOKEN", "RAMI_LEVY_ECOM_TOKEN", "RAMI_LEVY_USER_AGENT", "RAMI_LEVY_COOKIE", "RAMI_LEVY_STORE",
-    "GROCERY_STORES", "GROCERY_READ_ONLY",
-}
+# Rami Levy's browser-session tokens are not accepted: they live only on the
+# server, where they are renewed, so a deploy can never overwrite a renewal.
+ENV_KEYS = {"SHUFERSAL_USERNAME", "SHUFERSAL_PASSWORD", "RAMI_LEVY_STORE", "GROCERY_STORES", "GROCERY_READ_ONLY"}
 # name: (config file, key file, health address, compose service)
 TUNNELS = {
     "main": ("tunnel.yaml", "openai-tunnel.key", "127.0.0.1:8792", "tunnel"),

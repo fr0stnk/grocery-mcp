@@ -28,10 +28,9 @@ Rami Levy has no password login for the server. It uses the session headers of a
 ```sh
 python3 scripts/set_rami_levy_tokens.py                    # updates .env in this checkout
 python3 scripts/set_rami_levy_tokens.py --host my-server   # updates ~/grocery-mcp/.env on my-server over SSH
-python3 scripts/set_rami_levy_tokens.py --github           # stores them as GitHub secrets and starts the Deploy workflow
 ```
 
-Use `--github` once [automatic deployment](../README.md#automatic-deployment) is set up. The GitHub environment is then the source of truth, and a deploy would overwrite tokens written directly on the server.
+These tokens belong only on the server. [Automatic deployment](../README.md#automatic-deployment) neither sends nor accepts them, so renewing them with `--host` is never undone by a deploy.
 
 Example output:
 
@@ -65,8 +64,6 @@ Clipboard cleared.
 | `--remote-env PATH` | The `.env` path on `--host` (default `~/grocery-mcp/.env`) |
 | `--env-file PATH` | The local `.env` to update (default: the repository root's `.env`) |
 | `--from-file PATH` | Read the cURL from a file, or from stdin with `-`, instead of the clipboard |
-| `--github [ENV]` | Store the values as secrets in a GitHub environment (default `production`) through `gh`, then start the Deploy workflow |
-| `--no-deploy` | With `--github`, only store the secrets |
 | `--dry-run` | Check and report only. Nothing is written and the clipboard is kept. |
 
 ### Checks and safety
@@ -114,7 +111,7 @@ python3 scripts/setup_deploy.py --host <ssh-host> --deploy-host <server-tailnet-
 1. It creates the GitHub environment `production` and limits it to `main`.
 2. It generates an ed25519 key and installs its public half on the server as `from="100.64.0.0/10,fd7a:115c:a1e0::/48",restrict,command="python3 <checkout>/scripts/deploy_receiver.py" … grocery-mcp-deploy`, replacing any earlier deploy key. The `from=` option limits the key to Tailscale addresses, so it is refused even if the server's SSH is reachable another way, such as a router port forward. Change it with `--key-from`. The private half becomes the `DEPLOY_SSH_KEY` secret, and the local copy is deleted.
 3. It stores the server's tailnet address, user and ed25519 host key as variables, so the workflow can verify the server.
-4. It reads the server's `.env` and tunnel files over SSH and stores them as secrets and variables through `gh` on stdin. Values are never printed or passed as arguments.
+4. It reads the server's `.env` and tunnel files over SSH, and stores the Shufersal login, settings and tunnel keys as secrets and variables through `gh` on stdin. Values are never printed or passed as arguments. Rami Levy's session tokens are left on the server.
 
 | Option | Meaning |
 |---|---|
@@ -122,7 +119,7 @@ python3 scripts/setup_deploy.py --host <ssh-host> --deploy-host <server-tailnet-
 | `--repo OWNER/NAME`, `--environment NAME` | Target repository and environment (defaults: this checkout's repository and `production`) |
 | `--skip-key`, `--skip-credentials` | Keep the current deploy key, or skip copying credentials |
 
-`deploy_receiver.py` runs on the server for each deploy. It refuses releases that do not contain the receiver itself, such as v0.1.0, because the deploy key runs it from the checkout. It accepts only a release tag, known setting names and the `main` or `extra` tunnel, and it rejects requests over 64 KiB. Each deploy goes like this:
+`deploy_receiver.py` runs on the server for each deploy. It refuses Rami Levy session tokens, which belong to the server. It also refuses releases that do not contain the receiver itself, such as v0.1.0, because the deploy key runs it from the checkout. It accepts only a release tag, known setting names and the `main` or `extra` tunnel, and it rejects requests over 64 KiB. Each deploy goes like this:
 
 1. It backs up `.env` and the tunnel files, then writes the new values together with `GROCERY_IMAGE_TAG`.
 2. It checks out the tag and its submodules.

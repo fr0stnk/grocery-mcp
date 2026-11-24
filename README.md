@@ -154,7 +154,7 @@ CodeQL default setup scans the JavaScript, Python and workflow code on each push
 
 1. The runner joins your Tailscale network for the length of the job, using a `tag:ci` identity. No port is opened to the internet.
 2. It connects over SSH with a deploy key that the server only accepts for running [`scripts/deploy_receiver.py`](scripts/deploy_receiver.py) (`restrict,command=…`), and only from Tailscale addresses (`from="100.64.0.0/10,…"`). The server's host key is pinned.
-3. It sends one JSON request on stdin with the release tag and the credentials from the GitHub environment **production**.
+3. It sends one JSON request on stdin with the release tag and the credentials from the GitHub environment **production**. Rami Levy's session tokens are not included.
 4. The receiver checks the request and backs up the files it will change. It writes `.env` and the tunnel files, checks out the tag, and pulls that version's images. It then restarts `grocery-http` and the tunnels and waits until each reports ready. If anything fails, it restores the backups and the previous commit.
 
 The environment only accepts workflows from `main`, and its secrets are never given to pull requests from forks. Empty secrets leave the server's existing values unchanged.
@@ -187,12 +187,12 @@ The environment only accepts workflows from `main`, and its secrets are never gi
 | `TS_OAUTH_CLIENT_ID`, `TS_OAUTH_SECRET` | secrets | The Tailscale OAuth client |
 | `DEPLOY_SSH_KEY` | secret | The restricted deploy key |
 | `DEPLOY_SSH_HOST`, `DEPLOY_SSH_USER`, `DEPLOY_SSH_KNOWN_HOSTS` | variables | The server's tailnet address, user and pinned host key |
-| `SHUFERSAL_USERNAME`, `SHUFERSAL_PASSWORD`, `RAMI_LEVY_BEARER_TOKEN`, `RAMI_LEVY_ECOM_TOKEN`, `RAMI_LEVY_USER_AGENT`, `RAMI_LEVY_COOKIE` | secrets | Store credentials |
+| `SHUFERSAL_USERNAME`, `SHUFERSAL_PASSWORD` | secrets | Shufersal login |
 | `RAMI_LEVY_STORE`, `GROCERY_STORES`, `GROCERY_READ_ONLY` | variables | Non-secret settings |
 | `OPENAI_TUNNEL_KEY`, `OPENAI_TUNNEL_EXTRA_KEY` | secrets | Tunnel runtime keys |
 | `OPENAI_TUNNEL_ID`, `OPENAI_TUNNEL_EXTRA_ID` | variables | Tunnel IDs |
 
-Once deployment is set up, the GitHub environment is the source of truth for credentials. Change them there and run the Deploy workflow, or a deploy will overwrite what you edited on the server. For Rami Levy tokens, `python3 scripts/set_rami_levy_tokens.py --github` does both.
+Once deployment is set up, the GitHub environment is the source of truth for long-lived credentials: the Shufersal login, settings and tunnel keys. Change them there and run the Deploy workflow, or a deploy will overwrite what you edited on the server. Rami Levy's browser-session tokens (`RAMI_LEVY_BEARER_TOKEN`, `RAMI_LEVY_ECOM_TOKEN`, `RAMI_LEVY_USER_AGENT`, `RAMI_LEVY_COOKIE`) are the exception. They live only in the server's `.env`, deploys neither send nor accept them, and you renew them there with `python3 scripts/set_rami_levy_tokens.py --host <server>`.
 
 To update a server by hand:
 
