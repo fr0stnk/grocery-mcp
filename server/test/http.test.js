@@ -6,6 +6,7 @@ import path from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { parseListen } from '../src/http.js';
 
@@ -104,7 +105,7 @@ test('read-only mode lists only read tools and refuses writes', async () => {
   const { url } = await startHttp({ GROCERY_READ_ONLY: '1' });
   const client = await connect(url);
   const names = (await client.listTools()).tools.map((t) => t.name).sort();
-  assert.deepEqual(names, ['compare_basket', 'list_preferences', 'rami_levy_search_products', 'rami_levy_view_cart', 'search_all_stores']);
+  assert.deepEqual(names, ['account_status', 'compare_basket', 'list_preferences', 'rami_levy_search_products', 'rami_levy_view_cart', 'search_all_stores']);
   const refusedOwn = await client.callTool({ name: 'add_basket_to_cart', arguments: { store: 'shufersal', items: [{ productId: 'P_1' }] } });
   assert.match(refusedOwn.content[0].text, /read-only/);
   assert.match(client.getInstructions(), /read-only/);
@@ -187,4 +188,48 @@ test('preferences drive compare_basket and add_basket_to_cart previews over HTTP
   const preview = await call('add_basket_to_cart', { store: 'shufersal', items: [{ productId: offer.productId, quantity: 2 }], dry_run: true });
   assert.deepEqual([preview.store, preview.dryRun, preview.requested], ['shufersal', true, 1]);
   assert.deepEqual(await call('remove_preference', { name: 'milk' }), { removed: 'Milk' });
+});
+
+test('account_status runs live checks and search results carry account warnings', async () => {
+  const soon = ['e30', Buffer.from(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 2 * 86400 + 3600 })).toString('base64url'), 's'].join('.');
+  const { url } = await startHttp({ RAMI_LEVY_ECOM_TOKEN: soon });
+  const client = await connect(url);
+  const status = JSON.parse((await client.callTool({ name: 'account_status', arguments: {} })).content[0].text);
+  assert.deepEqual([status.stores.shufersal.loggedIn, status.stores['rami-levy'].loggedIn, status.stores['rami-levy'].token.daysLeft], [true, true, 2]);
+  const search = JSON.parse((await client.callTool({ name: 'search_all_stores', arguments: { query: 'חלב' } })).content[0].text);
+  assert.match(search.accountWarnings[0], /Rami Levy login expires in 2 days/);
+});
+
+test('the bridge relays a stdio client to the HTTP server and exits with it', async () => {
+  const { url } = await startHttp();
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: [path.join(here, '../src/bridge.js')],
+    env: { ...process.env, GROCERY_BRIDGE_URL: url },
+    stderr: 'pipe',
+  });
+  transport.stderr?.resume();
+  const client = new Client({ name: 'desktop', version: '0' });
+  await client.connect(transport);
+  const names = (await client.listTools()).tools.map((t) => t.name);
+  assert.ok(names.includes('account_status') && names.includes('shufersal_view_cart'), names.join(', '));
+  const search = JSON.parse((await client.callTool({ name: 'search_all_stores', arguments: { query: 'חלב' } })).content[0].text);
+  assert.equal(search.stores.shufersal.ok, true);
+  const pid = transport.pid;
+  await client.close();
+  await new Promise((r) => setTimeout(r, 500));
+  assert.throws(() => process.kill(pid, 0), /ESRCH/, 'the bridge exits when its client closes');
+});
+
+test('the bridge answers with an error when the server is unreachable', async () => {
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: [path.join(here, '../src/bridge.js')],
+    env: { ...process.env, GROCERY_BRIDGE_URL: 'http://127.0.0.1:9/mcp' },
+    stderr: 'pipe',
+  });
+  transport.stderr?.resume();
+  const client = new Client({ name: 'desktop', version: '0' });
+  cleanup.push(() => client.close());
+  await assert.rejects(client.connect(transport), /unreachable/);
 });

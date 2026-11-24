@@ -30,6 +30,8 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
     setTimeout(() => process.exit(1), 10);
     return { content: [{ type: 'text', text: 'bye' }] };
   }
+  if (name === 'status') return { content: [{ type: 'text', text: JSON.stringify({ signedIn: true, productCount: 0 }) }] };
+  if (name === 'rami_levy_check_status') return { content: [{ type: 'text', text: JSON.stringify({ ok: true, cartSize: 0 }) }] };
   if (name === searchTool) {
     if (args?.query === 'boom') return { isError: true, content: [{ type: 'text', text: 'search exploded' }] };
     return { content: [{ type: 'text', text: JSON.stringify(results[mode]) }] };

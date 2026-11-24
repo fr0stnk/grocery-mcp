@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { AccountMonitor } from './accounts.js';
 import { createGroceryServer } from './app.js';
 import { createStores } from './config.js';
 import { PreferenceStore } from './preferences.js';
@@ -13,6 +14,7 @@ const readOnly = /^(1|true|yes)$/i.test(process.env.GROCERY_READ_ONLY ?? '');
 const httpListen = process.env.GROCERY_HTTP ? parseListen(process.env.GROCERY_HTTP) : null;
 const stores = createStores();
 const preferences = new PreferenceStore();
+const monitor = new AccountMonitor();
 
 // Start the adapters before serving, so their tools and instructions are
 // known. A store that fails here is retried on its next use.
@@ -33,9 +35,9 @@ process.on('SIGINT', () => void shutdown(130));
 process.on('SIGTERM', () => void shutdown(143));
 
 if (httpListen) {
-  await startHttpServer({ ...httpListen, makeServer: () => createGroceryServer(stores, { readOnly, log, preferences }), log });
+  await startHttpServer({ ...httpListen, makeServer: () => createGroceryServer(stores, { readOnly, log, preferences, monitor }), log });
 } else {
-  const server = createGroceryServer(stores, { readOnly, log, preferences });
+  const server = createGroceryServer(stores, { readOnly, log, preferences, monitor });
   server.onclose = () => void shutdown(0);
   // The SDK's stdio transport does not close on end of input, and the child
   // adapters' pipes would keep this process alive after the client leaves.

@@ -103,7 +103,7 @@ RAMI_LEVY_COOKIE='cf_clearance=AbC...; _ga=GA1.1...; other=value'
 
 ## Connect an MCP client
 
-- **Local clients**, such as Claude Desktop, Claude Code and Codex, launch `docker compose run --rm -T grocery` as a stdio command. To reach a server on another machine, run it over `ssh -T <host> 'cd <checkout> && docker compose run --rm -T grocery'`. For Claude Desktop, add that command under `mcpServers` in `claude_desktop_config.json`.
+- **Local clients**, such as Claude Desktop, Claude Code and Codex, use a stdio command. When `grocery-http` is running, connect them through the bridge, which starts almost instantly and shares the running server's store sessions: `ssh -T <host> 'docker exec -i grocery-mcp-grocery-http-1 node src/bridge.js'`. Without `grocery-http`, use `ssh -T <host> 'cd <checkout> && docker compose run --rm -T grocery'`, which starts its own adapters. For Claude Desktop, put the command under `mcpServers` in `claude_desktop_config.json`.
 - **ChatGPT** connects through an OpenAI Secure MCP Tunnel to the `grocery-http` service, without exposing a port. See [`tunnel/README.md`](tunnel/README.md).
 - Set `GROCERY_READ_ONLY=1` to offer only searches and read tools.
 
@@ -112,6 +112,7 @@ RAMI_LEVY_COOKIE='cf_clearance=AbC...; _ga=GA1.1...; other=value'
 - `search_all_stores` searches both stores at once. Results are sorted by price per liter or kilogram, then by price, and each store's status is reported. If one store fails, the other store's results are still returned. Products with the same barcode in both stores are paired, with the cheaper store named. Rami Levy promotions, such as multi-buy offers, are included.
 - `compare_basket` prices a whole shopping list in both stores. It prefers identical products by barcode and applies Rami Levy multi-buy promotions. It returns each store's total and missing items, a fair comparison over items both stores have, and the total if the order is split. Searches are cached for 15 minutes, and recent prices are used if a store is briefly unavailable.
 - `add_basket_to_cart` adds the chosen store's basket to its real cart in one step, with a dry-run preview. Nothing is ordered or paid.
+- `account_status` checks both store logins live and shows when the Rami Levy token expires. Search and basket results carry `accountWarnings` from a week before expiry, or after a failed login, so the assistant tells you in the conversation.
 - `list_preferences`, `save_preference` and `remove_preference` keep household products such as "milk = Tnuva 3% 1 L", pinned by barcode, on the server. `compare_basket` can then price "our usual basket". The data lives in the `grocery-data` volume.
 - Each store's own tools are forwarded with a store prefix, such as `shufersal_view_cart` and `rami_levy_add_item`. Carts are separate per store, and no tool checks out or pays.
 

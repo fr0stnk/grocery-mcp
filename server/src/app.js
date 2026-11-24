@@ -2,6 +2,7 @@
 // JSON Schemas unchanged, which McpServer's zod-based registration cannot do.
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
+import { ACCOUNT_TOOL, AccountMonitor } from './accounts.js';
 import { BASKET_TOOL, compareBasket } from './basket.js';
 import { ADD_BASKET_TOOL, addBasketToCart } from './order.js';
 import { PREFERENCE_TOOLS, runPreferenceTool } from './preferences.js';
@@ -15,6 +16,7 @@ export function buildInstructions(stores, { readOnly }) {
     'Grocery tools for two Israeli supermarkets: Shufersal and Rami Levy.',
     'Use search_all_stores to compare prices of one product type across stores. Identical products are matched by barcode in sameProduct; compare the rest by name, size and pricePerUnit, and say which items you treat as equivalent.',
     'For a shopping list, use compare_basket with all items at once: it returns each store\'s total, missing items, a fair comparison over items both stores have, and the split total. Mention items where identical is false, and that delivery fees are not included. To order, show the chosen store\'s list and pass its offers to add_basket_to_cart in one call instead of adding items one by one.',
+    'Logins: when a result carries accountWarnings, tell the user in one short sentence and offer account_status for details and how to renew.',
     'Household preferences: list_preferences shows saved products (for example "milk" pinned to an exact barcode). Use them for "the usual milk" or "our usual basket" (compare_basket with usual: true). When the user picks a product they want again, offer to save it with save_preference, using its barcode.',
     'Language: users may write in Hebrew, Russian or English, and both store catalogs are in Hebrew. Search with Hebrew terms: use Hebrew requests as written, and translate Russian or English ones first (молоко / milk → חלב, яйца / eggs → ביצים, творог → קוטג\' or גבינה לבנה). If a search returns nothing, retry with a shorter or more common Hebrew term or a synonym before saying it is unavailable. Answer in the user\'s language. Show each product\'s Hebrew name as returned, with a short translation unless the user writes Hebrew, and prices in ₪.',
     readOnly
@@ -58,8 +60,9 @@ function describeCall(name, args, result) {
 }
 
 /** The server's own tools with their handlers; write tools are left out in read-only mode. */
-function ownTools(stores, preferences, { readOnly }) {
+function ownTools(stores, preferences, monitor, { readOnly }) {
   const tools = [
+    [ACCOUNT_TOOL, () => monitor.status(stores)],
     [SEARCH_TOOL, (args) => searchAllStores(stores, args)],
     [BASKET_TOOL, (args) => compareBasket(stores, args, { preferences })],
     [ADD_BASKET_TOOL, (args) => addBasketToCart(stores, args)],
@@ -68,7 +71,19 @@ function ownTools(stores, preferences, { readOnly }) {
   return new Map(tools.filter(([tool]) => !readOnly || tool.annotations?.readOnlyHint === true).map(([tool, run]) => [tool.name, { tool, run }]));
 }
 
-export function createGroceryServer(stores, { readOnly = false, log = () => {}, preferences = null } = {}) {
+/** Feeds search and basket outcomes to the monitor and attaches its warnings to the result. */
+function withAccountWarnings(name, result, monitor) {
+  if (name !== SEARCH_TOOL.name && name !== BASKET_TOOL.name) return result;
+  for (const [store, status] of Object.entries(result.stores ?? {})) {
+    if (!status.ok) monitor.observe(store, false, status.error);
+    // Shufersal search needs the login; Rami Levy's catalog search does not.
+    else if (store === 'shufersal' && !status.cached) monitor.observe(store, true);
+  }
+  const warnings = monitor.warnings();
+  return warnings.length ? { ...result, accountWarnings: warnings } : result;
+}
+
+export function createGroceryServer(stores, { readOnly = false, log = () => {}, preferences = null, monitor = new AccountMonitor() } = {}) {
   const server = new Server(
     { name: 'grocery-mcp', version: VERSION },
     { capabilities: { tools: { listChanged: true } }, instructions: buildInstructions(stores, { readOnly }) },
@@ -82,16 +97,16 @@ export function createGroceryServer(stores, { readOnly = false, log = () => {}, 
   }
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: [...[...ownTools(stores, preferences, { readOnly }).values()].map((t) => t.tool), ...[...forwardedTools(stores, { readOnly }).values()].map((r) => r.listed)],
+    tools: [...[...ownTools(stores, preferences, monitor, { readOnly }).values()].map((t) => t.tool), ...[...forwardedTools(stores, { readOnly }).values()].map((r) => r.listed)],
   }));
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args = {} } = request.params;
-    const own = ownTools(stores, preferences, { readOnly }).get(name);
+    const own = ownTools(stores, preferences, monitor, { readOnly }).get(name);
     if (own) {
       try {
         const started = Date.now();
-        const result = await own.run(args);
+        const result = withAccountWarnings(name, await own.run(args), monitor);
         log(`call ${name} ${describeCall(name, args, result)} in ${Date.now() - started} ms`);
         void refreshMissingTools();
         return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
@@ -102,14 +117,18 @@ export function createGroceryServer(stores, { readOnly = false, log = () => {}, 
 
     const route = forwardedTools(stores, { readOnly }).get(name);
     if (!route) {
-      const hidden = readOnly && (forwardedTools(stores, { readOnly: false }).has(name) || ownTools(stores, preferences, { readOnly: false }).has(name));
+      const hidden = readOnly && (forwardedTools(stores, { readOnly: false }).has(name) || ownTools(stores, preferences, monitor, { readOnly: false }).has(name));
       const text = hidden ? `${name} changes data and this server is read-only.` : `Unknown tool: ${name}`;
       return { isError: true, content: [{ type: 'text', text }] };
     }
     try {
       log(`call ${name}`);
-      return await route.store.callTool(route.tool.name, args, FORWARD_TIMEOUT_MS);
+      const result = await route.store.callTool(route.tool.name, args, FORWARD_TIMEOUT_MS);
+      const body = (result.content ?? []).filter((c) => c.type === 'text').map((c) => c.text).join('\n');
+      if (result.isError || /"ok"\s*:\s*false/.test(body)) monitor.observe(route.store.id, false, body);
+      return result;
     } catch (error) {
+      monitor.observe(route.store.id, false, error.message);
       return { isError: true, content: [{ type: 'text', text: `${route.store.label}: ${error.message}` }] };
     }
   });

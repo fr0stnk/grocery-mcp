@@ -110,6 +110,19 @@ This tool adds several products to **one** store's real cart in a single call, u
 - **Rami Levy:** one `rami_levy_add_item` per product. Each call syncs the whole cart, and quantities are added to what is already there. The tool reports each item's result. After 90 seconds it stops starting new adds and reports the rest as not attempted, which keeps it inside the OpenAI tunnel's 120-second limit.
 - Nothing is ordered or paid. Checkout happens in the store's app or site.
 
+### `account_status` and login warnings
+
+`account_status` checks each store's login live, using Shufersal's `status` and Rami Levy's `check_status`. It reports `loggedIn` per store and when the Rami Levy token expires (`expiresAt`, `daysLeft`). For a failed login it also returns `howToRenew`.
+
+The server also keeps track of login health between calls:
+
+- The Rami Levy `ecomtoken` is a JWT, so its expiry date is read from the token itself, with no network call.
+- Any call that fails with a login-type error, such as `auth_expired` or "not signed in", is remembered until the store works again.
+
+While something needs attention, every `search_all_stores` and `compare_basket` result carries `accountWarnings`. The instructions ask the client to tell the user in one sentence. Warnings start 7 days before the Rami Levy token expires. Search keeps working without a Rami Levy login, because it uses the public catalog, so the warning says that only carts and orders are affected.
+
+MCP cannot message a user outside a conversation. For a daily check, a client's own scheduler can call `account_status`, for example a ChatGPT scheduled task.
+
 ### Household preferences
 
 `list_preferences`, `save_preference` and `remove_preference` manage products the household buys again. The data is shared by every client of the server: you and your family, ChatGPT and Claude.
@@ -152,6 +165,16 @@ Each adapter's tools are listed with their input schemas unchanged. Each name ca
 - Rami Levy's 10 tools already start with `rami_levy_` and keep their names.
 
 Calls are passed through as they are, with a 110-second timeout, which fits within the OpenAI tunnel's 120-second limit. Tool annotations are kept. Rami Levy's adapter declares none, so `src/config.js` marks its read tools `readOnlyHint` and its removal tools `destructiveHint`. Without that, ChatGPT would ask for confirmation even before a search. `search_all_stores` is marked read-only. The adapters' own server instructions are appended to this server's instructions. Those include Shufersal's rule that tools never check out or pay.
+
+## Bridge for stdio clients
+
+`src/bridge.js` relays a stdio MCP client to the long-running HTTP server. Claude Desktop, for example, can then share its store sessions and start almost instantly instead of starting its own adapters:
+
+```sh
+ssh -T <server> 'docker exec -i grocery-mcp-grocery-http-1 node src/bridge.js'
+```
+
+The bridge connects to `GROCERY_BRIDGE_URL` (default `http://127.0.0.1:8791/mcp`), which is the server inside the same container. When the server cannot be reached, each request gets a JSON-RPC error instead of hanging. The bridge exits when the client closes stdin.
 
 ## Startup and failures
 
@@ -219,6 +242,7 @@ The tests use stand-in adapters from `test/fixtures/`, so they need no credentia
 
 - `normalize.test.js` covers size, price, barcode and promotion parsing, both stores' result shapes, weighed items, error reporting, sorting and barcode grouping. The cases come from live search results.
 - `http.test.js` runs the server in HTTP mode with stdin closed. It also checks catalog search against a local stand-in for the catalog API, including the store and User-Agent sent and the barcode pairing. It covers listing tools and annotations, search, two clients sharing one store process, 404, 405, 400 and a foreign `Host` header, and read-only mode.
+- `accounts.test.js` covers token expiry, warning thresholds, which errors count as login failures, and live status checks for healthy, logged-out, failing and hung stores. `http.test.js` also runs `account_status` and the warnings end to end, and runs the bridge with a stdio client, including exit on disconnect and an unreachable server.
 - `preferences.test.js` and `order.test.js` cover preference storage, validation and resolution into baskets, and both stores' cart paths, including failures, the time budget and dry runs.
 - `basket.test.js` covers the cache (TTL, stale fallback, merged loads), the concurrency limiter, match selection, promotion pricing, basket totals and a failing store.
 - `http-server.test.js` and `rami-catalog.test.js` test the HTTP listener and the catalog client in process, including error paths such as challenge pages, HTTP errors, refused connections and timeouts.
@@ -235,6 +259,8 @@ The tests use stand-in adapters from `test/fixtures/`, so they need no credentia
 | `src/stores.js` | `StoreClient`: one adapter process, with startup, restart and stderr capture |
 | `src/search.js` | `search_all_stores`, per-store cached search and barcode grouping |
 | `src/basket.js` | `compare_basket`: match selection, promotion pricing and totals |
+| `src/accounts.js` | `account_status`, Rami Levy token expiry and remembered login failures |
+| `src/bridge.js` | stdio-to-HTTP relay for clients such as Claude Desktop |
 | `src/order.js` | `add_basket_to_cart`: Shufersal bulk add, Rami Levy per-item adds with a time budget |
 | `src/preferences.js` | Household preference store and its three tools |
 | `src/version.js` | Reads the version from `package.json` |
