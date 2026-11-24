@@ -9,3 +9,7 @@
 !upstream/*/src/**
 !upstream/shufersal-cart/bin/
 !upstream/shufersal-cart/bin/**
+!server/
+!server/package*.json
+!server/src/
+!server/src/**

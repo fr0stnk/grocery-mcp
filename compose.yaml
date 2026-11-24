@@ -25,6 +25,24 @@ services:
     volumes:
       - shufersal-data:/data
 
+  grocery:
+    build:
+      context: .
+      target: grocery
+    stdin_open: true
+    environment:
+      - RAMI_LEVY_BEARER_TOKEN
+      - RAMI_LEVY_ECOM_TOKEN
+      - RAMI_LEVY_USER_AGENT
+      - RAMI_LEVY_COOKIE
+      - RAMI_LEVY_STORE
+      - SHUFERSAL_USERNAME
+      - SHUFERSAL_PASSWORD
+      - GROCERY_STORES
+    volumes:
+      - rami-data:/data/rami-levy
+      - shufersal-data:/data/shufersal
+
 volumes:
   rami-data:
   shufersal-data:

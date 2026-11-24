@@ -27,3 +27,23 @@ ENV SHUFERSAL_COOKIE_FILE=/data/cookies.json \
     SHUFERSAL_CHOICES_FILE=/data/choices.json
 USER node
 CMD ["node", "bin/shufersal-mcp.mjs"]
+
+FROM base AS server-deps
+COPY server/package*.json ./
+RUN npm ci --omit=dev && npm cache clean --force
+
+# One server that runs both adapters as child processes. Paths mirror the
+# repository so the server's default adapter locations work unchanged.
+FROM base AS grocery
+COPY --from=rami-levy /app /app/upstream/rami-levy-mcp
+COPY --from=shufersal --chown=node:node /app /app/upstream/shufersal-cart
+COPY --from=server-deps /app/node_modules /app/server/node_modules
+COPY --chown=node:node server/package.json /app/server/
+COPY --chown=node:node server/src /app/server/src
+RUN install -d -m 0700 -o node -g node /data/rami-levy /data/shufersal
+ENV RAMI_LEVY_DB_PATH=/data/rami-levy/cart.db \
+    SHUFERSAL_COOKIE_FILE=/data/shufersal/cookies.json \
+    SHUFERSAL_CHOICES_FILE=/data/shufersal/choices.json
+USER node
+WORKDIR /app/server
+CMD ["node", "src/index.js"]

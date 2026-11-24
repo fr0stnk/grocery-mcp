@@ -1,6 +1,6 @@
 # Grocery MCP
 
-Grocery MCP is a project to bring Rami Levy and Shufersal shopping tools together in one self-hosted MCP server. The repository currently provides pinned retailer integrations that you can run on a host with Docker and Docker Compose. Deployment guides will follow as the unified server becomes available.
+Grocery MCP brings Rami Levy and Shufersal shopping tools together in one self-hosted MCP server. It runs both pinned retailer integrations as child processes, adds a price search across both stores, and forwards each store's own tools. You can run it on a host with Docker and Docker Compose.
 
 ## Retailer integrations
 
@@ -18,7 +18,7 @@ For an existing clone, run `git submodule update --init --recursive` from the re
 
 ## Run with Docker Compose
 
-From the repository root, build the two adapters on your Docker host. The containers use Node 22.
+From the repository root, build the images on your Docker host. The containers use Node 22.
 
 ```sh
 docker compose build
@@ -32,9 +32,30 @@ For Shufersal, import an exported desktop session from a file readable by the co
 docker compose run --rm -T -v "$SESSION_FILE:/tmp/session.json:ro" shufersal npm run session -- import /tmp/session.json
 ```
 
-Configure your MCP client to launch one of these stdio commands from the checkout. Each client starts its adapter on demand. The named volumes preserve the Rami Levy basket and the Shufersal session and product choices between runs.
+Configure your MCP client to launch the combined server from the checkout. The client starts it on demand over stdio, and it exits when the client disconnects.
 
 ```sh
-docker compose run --rm -T rami-levy
-docker compose run --rm -T shufersal
+docker compose run --rm -T grocery
 ```
+
+The named volumes preserve the Rami Levy basket and the Shufersal session and product choices between runs. The combined server and the single-store services share the same volumes.
+
+## Tools
+
+- `search_all_stores` searches both stores at once. Results are sorted by price per liter or kilogram, then by price, and each store's status is reported. If one store fails, the other store's results are still returned. Products are not matched across stores, because the Rami Levy integration does not return barcodes.
+- Each store's own tools are forwarded with a store prefix, such as `shufersal_view_cart` and `rami_levy_add_item`. Carts are separate per store, and no tool checks out or pays.
+
+A store that cannot start, for example because its credentials are missing, is reported in search results. The other store keeps working. To run only one store, set `GROCERY_STORES` to `shufersal` or `rami-levy`.
+
+To use a single store's server without the combined server, run `docker compose run --rm -T rami-levy` or `docker compose run --rm -T shufersal`.
+
+## Development
+
+The combined server lives in `server/` and needs Node 22.13 or newer. Run its tests from that folder:
+
+```sh
+npm ci
+npm test
+```
+
+The tests use stand-in adapters, so they need no credentials or network access.

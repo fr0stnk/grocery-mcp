@@ -1,2 +1,4 @@
 /plans/
 /.env
+/AGENTS.md
+node_modules/
