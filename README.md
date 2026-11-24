@@ -102,13 +102,12 @@ A store that cannot start, for example because its credentials are missing, is r
 
 To use a single store's server without the combined server, run `docker compose run --rm -T rami-levy` or `docker compose run --rm -T shufersal`.
 
-## Development
+## Repository layout
 
-The combined server lives in `server/` and needs Node 22.13 or newer. Run its tests from that folder:
-
-```sh
-npm ci
-npm test
-```
-
-The tests use stand-in adapters, so they need no credentials or network access.
+| Path | Contents |
+|---|---|
+| [`server/`](server/README.md) | The combined MCP server: how it works, configuration, local runs and tests |
+| [`scripts/`](scripts/README.md) | Setup helpers, such as saving Rami Levy tokens into `.env` |
+| `upstream/` | The pinned Rami Levy and Shufersal integrations, as git submodules |
+| `Dockerfile`, `compose.yaml` | Images and services for `grocery`, `rami-levy` and `shufersal` |
+| `.env.example` | Every credential and setting, with placeholders |
