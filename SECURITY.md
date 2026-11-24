@@ -24,6 +24,10 @@ Problems in the pinned store integrations under `upstream/` belong to their own 
 - Keep `.env`, `tunnel/secrets/` and the data volumes private. They hold store passwords, session tokens and API keys.
 - HTTP mode has no authentication of its own. Bind it to loopback, which is the default, and reach it only through an access-controlled path such as an OpenAI Secure MCP Tunnel or SSH. Never publish it on a public port.
 - Give tunnel runtime keys only the **Tunnels: Read + Use** permissions.
-- For automatic deployment, keep the deploy key's `restrict,command=` line as `setup_deploy.py` writes it. Allow `tag:ci` in Tailscale to reach only the server's SSH port, and keep the `production` environment limited to `main`.
+- For automatic deployment:
+  - Keep the deploy key's `from=…,restrict,command=…` line as `setup_deploy.py` writes it. That way the key can only run the receiver, and only from Tailscale addresses.
+  - Allow `tag:ci` in Tailscale to reach only the server's SSH port. If the policy still has the default `"src": ["*"]` rule, it also covers tagged devices. Use `autogroup:member` for people's devices instead.
+  - Keep the `production` environment limited to `main`, and protect the GitHub account with two-factor authentication. Anyone who can push to `main` or create release tags controls what the server runs.
+  - Workflow actions are pinned to full commit SHAs, and Dependabot proposes updates.
 - Set `GROCERY_READ_ONLY=1` for clients that should not change carts.
 - No tool checks out or pays. Orders are completed on the store's own site or app.

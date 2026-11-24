@@ -112,7 +112,7 @@ python3 scripts/setup_deploy.py --host <ssh-host> --deploy-host <server-tailnet-
 ```
 
 1. It creates the GitHub environment `production` and limits it to `main`.
-2. It generates an ed25519 key and installs its public half on the server as `restrict,command="python3 <checkout>/scripts/deploy_receiver.py" … grocery-mcp-deploy`, replacing any earlier deploy key. The private half becomes the `DEPLOY_SSH_KEY` secret, and the local copy is deleted.
+2. It generates an ed25519 key and installs its public half on the server as `from="100.64.0.0/10,fd7a:115c:a1e0::/48",restrict,command="python3 <checkout>/scripts/deploy_receiver.py" … grocery-mcp-deploy`, replacing any earlier deploy key. The `from=` option limits the key to Tailscale addresses, so it is refused even if the server's SSH is reachable another way, such as a router port forward. Change it with `--key-from`. The private half becomes the `DEPLOY_SSH_KEY` secret, and the local copy is deleted.
 3. It stores the server's tailnet address, user and ed25519 host key as variables, so the workflow can verify the server.
 4. It reads the server's `.env` and tunnel files over SSH and stores them as secrets and variables through `gh` on stdin. Values are never printed or passed as arguments.
 

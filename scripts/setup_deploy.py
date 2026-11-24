@@ -10,7 +10,8 @@ MagicDNS name. Requires the GitHub CLI (gh) to be logged in with repo access.
 It configures the GitHub environment "production" and the server:
   1. creates the environment and limits it to the main branch,
   2. generates an ed25519 deploy key and installs it on the server with
-     restrict,command=".../scripts/deploy_receiver.py", so it can only deploy,
+     restrict,command=".../scripts/deploy_receiver.py" and from Tailscale
+     addresses only, so it can only deploy and only over the tailnet,
      stores the private key as the DEPLOY_SSH_KEY secret and deletes the
      local copy,
   3. stores the server's SSH host key and address as variables,
@@ -29,6 +30,9 @@ import sys
 import tempfile
 
 KEY_COMMENT = "grocery-mcp-deploy"
+# Tailscale assigns addresses from these ranges, so the deploy key is refused from
+# anywhere else, for example through a router port forward to the server's SSH.
+TAILNET_SOURCES = "100.64.0.0/10,fd7a:115c:a1e0::/48"
 SECRET_SETTINGS = ["SHUFERSAL_USERNAME", "SHUFERSAL_PASSWORD", "RAMI_LEVY_BEARER_TOKEN", "RAMI_LEVY_ECOM_TOKEN", "RAMI_LEVY_USER_AGENT", "RAMI_LEVY_COOKIE"]
 VARIABLE_SETTINGS = ["RAMI_LEVY_STORE", "GROCERY_STORES", "GROCERY_READ_ONLY"]
 
@@ -88,10 +92,11 @@ print("replaced" if len(kept) < len(old) else "added")
 """
 
 
-def authorized_key_line(public_key, python, checkout):
-    """A deploy key that can only run the receiver: no shell, forwarding or terminal."""
+def authorized_key_line(public_key, python, checkout, sources=TAILNET_SOURCES):
+    """A deploy key that can only run the receiver (no shell, forwarding or terminal), and only from `sources`."""
     command = "{} {}/scripts/deploy_receiver.py".format(python, checkout)
-    return 'restrict,command="{}" {} {}'.format(command, " ".join(public_key.split()[:2]), KEY_COMMENT)
+    origin = 'from="{}",'.format(sources) if sources else ""
+    return '{}restrict,command="{}" {} {}'.format(origin, command, " ".join(public_key.split()[:2]), KEY_COMMENT)
 
 
 def known_hosts_line(deploy_host, host_public_key):
@@ -153,6 +158,8 @@ def main():
     ap.add_argument("--checkout", default="~/grocery-mcp", help="repository checkout on the server (default: %(default)s)")
     ap.add_argument("--repo", help="GitHub repository OWNER/NAME (default: this checkout's)")
     ap.add_argument("--environment", default="production")
+    ap.add_argument("--key-from", default=TAILNET_SOURCES, metavar="CIDRS",
+                    help="source addresses allowed to use the deploy key (default: Tailscale ranges %(default)s; empty allows any)")
     ap.add_argument("--skip-key", action="store_true", help="keep the current deploy key")
     ap.add_argument("--skip-credentials", action="store_true", help="do not copy the server's credentials")
     opts = ap.parse_args()
@@ -172,7 +179,7 @@ def main():
         with tempfile.TemporaryDirectory() as tmp:
             key = pathlib.Path(tmp) / "deploy"
             subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", KEY_COMMENT, "-f", str(key)], check=True)
-            line = authorized_key_line(key.with_suffix(".pub").read_text(), info["python"], info["checkout"])
+            line = authorized_key_line(key.with_suffix(".pub").read_text(), info["python"], info["checkout"], opts.key_from)
             print("   server key", ssh(opts.host, INSTALL_KEY, line, KEY_COMMENT).strip(), "- restricted to scripts/deploy_receiver.py")
             github.secret("DEPLOY_SSH_KEY", key.read_text())
         print("   private key stored as DEPLOY_SSH_KEY; local copy deleted")

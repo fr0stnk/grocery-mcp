@@ -11,9 +11,11 @@ setup = load("setup_deploy")
 
 
 class SetupDeploy(unittest.TestCase):
-    def test_deploy_key_can_only_run_the_receiver(self):
+    def test_deploy_key_can_only_run_the_receiver_from_the_tailnet(self):
         line = setup.authorized_key_line("ssh-ed25519 AAAAkey generated@laptop\n", "/usr/bin/python3", "/home/u/grocery-mcp")
-        self.assertEqual(line, 'restrict,command="/usr/bin/python3 /home/u/grocery-mcp/scripts/deploy_receiver.py" ssh-ed25519 AAAAkey grocery-mcp-deploy')
+        self.assertEqual(line, 'from="100.64.0.0/10,fd7a:115c:a1e0::/48",restrict,command="/usr/bin/python3 /home/u/grocery-mcp/scripts/deploy_receiver.py" ssh-ed25519 AAAAkey grocery-mcp-deploy')
+        anywhere = setup.authorized_key_line("ssh-ed25519 AAAAkey x", "/usr/bin/python3", "/c", sources="")
+        self.assertTrue(anywhere.startswith('restrict,command='))
 
     def test_known_hosts_pins_the_deploy_address(self):
         self.assertEqual(setup.known_hosts_line("100.64.0.10", "ssh-ed25519 AAAAhost root@pi\n"), "100.64.0.10 ssh-ed25519 AAAAhost")
