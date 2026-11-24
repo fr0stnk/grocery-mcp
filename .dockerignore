@@ -1,0 +1,11 @@
+**
+!upstream/
+!upstream/rami-levy-mcp/
+!upstream/shufersal-cart/
+!upstream/*/package*.json
+!upstream/*/tsconfig.json
+!upstream/*/LICENSE
+!upstream/*/src/
+!upstream/*/src/**
+!upstream/shufersal-cart/bin/
+!upstream/shufersal-cart/bin/**

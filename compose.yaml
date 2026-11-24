@@ -1,0 +1,30 @@
+name: grocery-mcp
+services:
+  rami-levy:
+    build:
+      context: .
+      target: rami-levy
+    stdin_open: true
+    environment:
+      - RAMI_LEVY_BEARER_TOKEN
+      - RAMI_LEVY_ECOM_TOKEN
+      - RAMI_LEVY_USER_AGENT
+      - RAMI_LEVY_COOKIE
+      - RAMI_LEVY_STORE
+    volumes:
+      - rami-data:/data
+
+  shufersal:
+    build:
+      context: .
+      target: shufersal
+    stdin_open: true
+    environment:
+      - SHUFERSAL_USERNAME
+      - SHUFERSAL_PASSWORD
+    volumes:
+      - shufersal-data:/data
+
+volumes:
+  rami-data:
+  shufersal-data:
