@@ -93,6 +93,12 @@ RAMI_LEVY_COOKIE='cf_clearance=AbC...; _ga=GA1.1...; other=value'
 - It expires within hours to a few days. An expired cookie can itself cause `blocked_by_cloudflare`, so capture it again then, or set `RAMI_LEVY_COOKIE=''` to send no cookie.
 - When the server's connection is not challenged, leave it empty.
 
+## Connect an MCP client
+
+- **Local clients**, such as Claude Desktop, Claude Code and Codex, launch `docker compose run --rm -T grocery` as a stdio command. To reach a server on another machine, run it over `ssh -T <host> 'cd <checkout> && docker compose run --rm -T grocery'`. For Claude Desktop, add that command under `mcpServers` in `claude_desktop_config.json`.
+- **ChatGPT** connects through an OpenAI Secure MCP Tunnel to the `grocery-http` service, without exposing a port. See [`tunnel/README.md`](tunnel/README.md).
+- Set `GROCERY_READ_ONLY=1` to offer only searches and read tools.
+
 ## Tools
 
 - `search_all_stores` searches both stores at once. Results are sorted by price per liter or kilogram, then by price, and each store's status is reported. If one store fails, the other store's results are still returned. Products are not matched across stores, because the Rami Levy integration does not return barcodes.
@@ -109,5 +115,7 @@ To use a single store's server without the combined server, run `docker compose 
 | [`server/`](server/README.md) | The combined MCP server: how it works, configuration, local runs and tests |
 | [`scripts/`](scripts/README.md) | Setup helpers, such as saving Rami Levy tokens into `.env` |
 | `upstream/` | The pinned Rami Levy and Shufersal integrations, as git submodules |
+| [`tunnel/`](tunnel/README.md) | Connecting ChatGPT through an OpenAI Secure MCP Tunnel, with no public URL |
 | `Dockerfile`, `compose.yaml` | Images and services for `grocery`, `rami-levy` and `shufersal` |
+| `compose.tunnel.yaml` | Optional `grocery-http` and `tunnel` services for ChatGPT |
 | `.env.example` | Every credential and setting, with placeholders |

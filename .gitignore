@@ -3,3 +3,6 @@
 /AGENTS.md
 node_modules/
 __pycache__/
+/tunnel/tunnel.yaml
+/tunnel/secrets/
+/tunnel/runtime/

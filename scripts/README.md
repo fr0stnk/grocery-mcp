@@ -5,6 +5,7 @@ These are helper scripts for setting up Grocery MCP. Run them from the repositor
 | Script | Purpose |
 |---|---|
 | [`set_rami_levy_tokens.py`](set_rami_levy_tokens.py) | Saves Rami Levy session headers and cookie into `.env`, from a browser's **Copy as cURL** |
+| [`setup_openai_tunnel.py`](setup_openai_tunnel.py) | Saves the OpenAI tunnel ID and runtime key for the ChatGPT connection. Run it on the server. |
 
 ## `set_rami_levy_tokens.py`
 
@@ -64,3 +65,24 @@ Clipboard cleared.
 - It clears the clipboard after a successful write. Supported clipboards are macOS (`pbpaste`), Wayland (`wl-paste`) and X11 (`xclip` or `xsel`). Elsewhere, use `--from-file`.
 
 The tokens and cookie expire. Run the script again when the server reports `auth_expired` or `blocked_by_cloudflare`. The root README's [Credentials](../README.md#credentials) section explains each value, including `cf_clearance`'s binding to the browser's IP address and User-Agent.
+
+## `setup_openai_tunnel.py`
+
+This script configures the [ChatGPT tunnel](../tunnel/README.md). Run it on the server that runs `grocery-http`, from the repository root:
+
+```sh
+python3 scripts/setup_openai_tunnel.py
+```
+
+It asks for the tunnel ID, which is visible, and then the restricted runtime key (**Tunnels: Read + Use**), which is hidden. It writes:
+
+- `tunnel/tunnel.yaml`, which holds the tunnel ID, the MCP URL `http://127.0.0.1:8791/mcp` and the health address `127.0.0.1:8792`. The config refers to the key by file path and does not contain it.
+- `tunnel/secrets/openai-tunnel.key`, mode `0600`, in a `0700` folder.
+
+Both are ignored by git. The script refuses a tunnel ID or key that does not look valid. The key is never printed or passed as an argument.
+
+| Option | Meaning |
+|---|---|
+| `--mcp-url URL` | The MCP endpoint the tunnel forwards to (default `http://127.0.0.1:8791/mcp`) |
+| `--health ADDR` | tunnel-client's health and admin address (default `127.0.0.1:8792`) |
+| `--keep-key` | Only rewrite `tunnel.yaml`, for example for a new tunnel ID, and keep the saved key |

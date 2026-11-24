@@ -8,8 +8,8 @@ const STDERR_TAIL = 2000;
  * started on first use and restarted on the next call after it exits.
  */
 export class StoreClient {
-  constructor({ id, label, toolPrefix, search, command, args, cwd, env, connectTimeoutMs = 30_000 }) {
-    Object.assign(this, { id, label, toolPrefix, search, command, args, cwd, env, connectTimeoutMs });
+  constructor({ id, label, toolPrefix, search, annotations, command, args, cwd, env, connectTimeoutMs = 30_000 }) {
+    Object.assign(this, { id, label, toolPrefix, search, annotations, command, args, cwd, env, connectTimeoutMs });
     this.client = null;
     this.connecting = null;
     this.stderrTail = '';

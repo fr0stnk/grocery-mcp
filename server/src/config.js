@@ -21,6 +21,18 @@ export const STORE_DEFS = {
     entryEnv: 'GROCERY_RAMI_LEVY_ENTRY',
     entry: 'upstream/rami-levy-mcp/dist/index.js',
     search: { tool: 'rami_levy_search_products', maxLimit: 50, normalize: normalizeRamiLevy },
+    // The adapter declares no tool annotations. Without readOnlyHint, clients
+    // such as ChatGPT treat every tool as a write and ask for confirmation.
+    annotations: {
+      rami_levy_search_products: { readOnlyHint: true },
+      rami_levy_view_cart: { readOnlyHint: true },
+      rami_levy_suggest_reorder: { readOnlyHint: true },
+      rami_levy_list_orders: { readOnlyHint: true },
+      rami_levy_view_order: { readOnlyHint: true },
+      rami_levy_check_status: { readOnlyHint: true },
+      rami_levy_remove_item: { destructiveHint: true },
+      rami_levy_clear_cart: { destructiveHint: true },
+    },
   },
 };
 
@@ -40,6 +52,7 @@ export function createStores(env = process.env) {
       label: def.label,
       toolPrefix: def.toolPrefix,
       search: def.search,
+      annotations: def.annotations,
       command: process.execPath,
       args: [entry],
       cwd: path.resolve(path.dirname(entry), '..'),

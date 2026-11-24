@@ -47,3 +47,12 @@ ENV RAMI_LEVY_DB_PATH=/data/rami-levy/cart.db \
 USER node
 WORKDIR /app/server
 CMD ["node", "src/index.js"]
+
+# Runs OpenAI's tunnel-client, which is mounted at runtime and needs the
+# system CA bundle for its outbound TLS connection.
+FROM debian:bookworm-slim AS tunnel
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+USER 1000:1000
+ENTRYPOINT ["/opt/tunnel-client"]

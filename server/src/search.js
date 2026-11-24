@@ -8,6 +8,7 @@ export const SEARCH_TOOL = {
     'Search Shufersal and Rami Levy at once (Hebrew works best). Returns one list sorted by price per liter or kilogram, ' +
     'then price, with per-store status. A store that fails is reported in `stores` and the other store still answers. ' +
     'Products are not matched across stores: compare by name, size and pricePerUnit, and tell the user which items you treat as equivalent.',
+  annotations: { readOnlyHint: true, openWorldHint: true },
   inputSchema: {
     type: 'object',
     properties: {

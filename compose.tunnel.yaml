@@ -1,0 +1,57 @@
+# Optional: run the combined server over HTTP and connect it to ChatGPT
+# through an OpenAI Secure MCP Tunnel. See tunnel/README.md.
+#   docker compose -f compose.yaml -f compose.tunnel.yaml up -d grocery-http tunnel
+services:
+  grocery-http:
+    image: grocery-mcp-grocery:latest
+    build:
+      context: .
+      target: grocery
+    restart: unless-stopped
+    # Host networking keeps the listener on loopback only and uses the host's
+    # DNS, so no port is published and no bridge DNS workaround is needed.
+    network_mode: host
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 128
+    tmpfs: ["/tmp:size=64m,nosuid,nodev"]
+    environment:
+      - RAMI_LEVY_BEARER_TOKEN
+      - RAMI_LEVY_ECOM_TOKEN
+      - RAMI_LEVY_USER_AGENT
+      - RAMI_LEVY_COOKIE
+      - RAMI_LEVY_STORE
+      - SHUFERSAL_USERNAME
+      - SHUFERSAL_PASSWORD
+      - GROCERY_STORES
+      - GROCERY_READ_ONLY
+      - GROCERY_HTTP=127.0.0.1:8791
+    volumes:
+      - rami-data:/data/rami-levy
+      - shufersal-data:/data/shufersal
+    logging:
+      driver: json-file
+      options: {max-size: "5m", max-file: "2"}
+
+  tunnel:
+    image: grocery-mcp-tunnel:latest
+    build:
+      context: .
+      target: tunnel
+    restart: unless-stopped
+    depends_on: [grocery-http]
+    network_mode: host
+    command: ["run", "--config", "/config/tunnel.yaml"]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 64
+    tmpfs: ["/tmp:size=32m,noexec,nosuid,nodev"]
+    volumes:
+      - ./tunnel/runtime/tunnel-client:/opt/tunnel-client:ro
+      - ./tunnel/tunnel.yaml:/config/tunnel.yaml:ro
+      - ./tunnel/secrets/openai-tunnel.key:/run/secrets/openai-tunnel.key:ro
+    logging:
+      driver: json-file
+      options: {max-size: "5m", max-file: "2"}
