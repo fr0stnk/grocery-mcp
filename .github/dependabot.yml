@@ -1,0 +1,28 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /server
+    schedule:
+      interval: weekly
+    groups:
+      development:
+        dependency-type: development
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+    ignore:
+      # The images stay on Node 22 LTS and Debian bookworm until a deliberate upgrade.
+      - dependency-name: node
+        update-types: ["version-update:semver-major"]
+      - dependency-name: debian
+        update-types: ["version-update:semver-major"]
+  # Proposes new upstream Rami Levy and Shufersal revisions as pull requests.
+  - package-ecosystem: gitsubmodule
+    directory: /
+    schedule:
+      interval: weekly

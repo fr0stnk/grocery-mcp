@@ -1,5 +1,10 @@
 # Grocery MCP
 
+[![Tests and images](https://github.com/fr0stnk/grocery-mcp/actions/workflows/images.yml/badge.svg)](https://github.com/fr0stnk/grocery-mcp/actions/workflows/images.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Node.js 22.13+](https://img.shields.io/badge/node-%E2%89%A522.13-brightgreen.svg)](server/package.json)
+[![Images: amd64 and arm64](https://img.shields.io/badge/images-amd64%20%7C%20arm64-informational.svg)](https://github.com/fr0stnk?tab=packages&repo_name=grocery-mcp)
+
 Grocery MCP brings Rami Levy and Shufersal shopping tools together in one self-hosted MCP server. It runs both pinned retailer integrations as child processes, adds a price search across both stores, and forwards each store's own tools. You can run it on a host with Docker and Docker Compose.
 
 ## Retailer integrations
@@ -143,3 +148,8 @@ docker compose up -d         # only for long-running services such as grocery-ht
 | `.github/workflows/` | Tests and multi-platform image publishing |
 | `compose.tunnel.yaml` | Optional `grocery-http` and `tunnel` services for ChatGPT |
 | `.env.example` | Every credential and setting, with placeholders |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md), [`SECURITY.md`](SECURITY.md) | Development setup and checks, and how to report vulnerabilities |
+
+## License
+
+[MIT](LICENSE). The pinned [Rami Levy](https://github.com/shaiu/rami-levy-mcp) and [Shufersal](https://github.com/digitalbastard103/shufersal-cart) integrations are MIT-licensed by their own authors.
