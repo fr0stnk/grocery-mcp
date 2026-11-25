@@ -11,7 +11,7 @@ Grocery MCP brings Rami Levy and Shufersal shopping tools together in one self-h
 ## Retailer integrations
 
 - [Rami Levy](https://github.com/shaiu/rami-levy-mcp) lives in `upstream/rami-levy-mcp`.
-- [Shufersal](https://github.com/digitalbastard103/shufersal-cart) lives in `upstream/shufersal-cart`.
+- [Shufersal](https://github.com/digitalbastard103/shufersal-cart) lives in `upstream/shufersal-cart`. It is pinned to the fork [`fr0stnk/shufersal-cart`](https://github.com/fr0stnk/shufersal-cart), which adds cart-validation fixes offered upstream: pinned codes are checked, malformed quantities are rejected, duplicates add up, summaries cover every line, and variant codes are accepted.
 
 ## Clone with both integrations
 

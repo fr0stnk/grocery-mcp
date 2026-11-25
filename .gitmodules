@@ -3,4 +3,4 @@
 	url = https://github.com/shaiu/rami-levy-mcp.git
 [submodule "upstream/shufersal-cart"]
 	path = upstream/shufersal-cart
-	url = https://github.com/digitalbastard103/shufersal-cart.git
+	url = https://github.com/fr0stnk/shufersal-cart.git

@@ -73,8 +73,8 @@ async function lookup(store, productId, cache) {
   const same = (x) => x.store === store.id && x.productId.toUpperCase() === productId.toUpperCase();
   const cached = cache.findFresh(same);
   if (cached) return cached.item;
-  const digits = productId.replace(/^P_/i, '');
-  if (store.id !== 'shufersal' || !/^\d+$/.test(digits)) return null;
+  const digits = /^P_(\d+)/i.exec(productId)?.[1];
+  if (store.id !== 'shufersal' || !digits) return null;
   // Searching Shufersal for a product's number returns that product.
   try {
     const hit = await searchStore(store, digits, { cache });
@@ -85,7 +85,7 @@ async function lookup(store, productId, cache) {
 }
 
 async function checkShufersal(store, it, cache) {
-  if (!/^P_\d+$/i.test(it.productId)) return reject(it, 'UNSUPPORTED_PRODUCT_ID', `${it.productId} is not a plain Shufersal code like P_4131074; the adapter cannot add it yet`);
+  if (!/^P_\d+(?:_\d+)?$/i.test(it.productId)) return reject(it, 'UNSUPPORTED_PRODUCT_ID', `${it.productId} is not a Shufersal code like P_4131074 or P_7296073409441_42`);
   if (!Number.isInteger(it.quantity)) return reject(it, 'INVALID_QUANTITY', 'Shufersal needs whole units here');
   const product = await lookup(store, it.productId, cache);
   if (product === undefined) return reject(it, 'STORE_UNAVAILABLE', 'Shufersal could not be searched to check this product');

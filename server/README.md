@@ -115,7 +115,7 @@ This tool adds several products to **one** store's real cart in a single call, u
   - `PRODUCT_NOT_FOUND` for an unknown product,
   - `OUT_OF_STOCK`, including Rami Levy items not sold at the branch,
   - `UNSUPPORTED_SELLING_METHOD` for Shufersal items sold by weight or package, which are added in Shufersal's app,
-  - `UNSUPPORTED_PRODUCT_ID` for Shufersal codes with a suffix, which the adapter cannot take yet,
+  - `UNSUPPORTED_PRODUCT_ID` for anything that is not a Shufersal code; variant codes such as `P_7296073409441_42` are accepted,
   - `INVALID_QUANTITY` for a fractional quantity of an item sold by unit,
   - `MISSING_OFFER_DETAILS` for a Rami Levy product the server has not seen and no name or price was given.
 - Every result line has a `status` (`added`, `would-add` or `rejected`). The summary counts `requested`, `accepted`, `rejected` and `added`, and `complete` is true only when every line went through.

@@ -26,6 +26,7 @@ test('Shufersal checks every product the same way in a dry run, before anything 
   const store = fakeStore('shufersal', {
     catalog: {
       7290102398065: [product('shufersal', 'P_7290102398065')],
+      7296073409441: [product('shufersal', 'P_7296073409441'), product('shufersal', 'P_7296073409441_42', { name: 'variant' })],
       939995: [product('shufersal', 'P_939995', { name: 'פילה סלמון קפוא', priceBasis: 'kg', soldByWeight: true })],
       1111111: [product('shufersal', 'P_1111111', { inStock: false })],
     },
@@ -36,14 +37,16 @@ test('Shufersal checks every product the same way in a dry run, before anything 
     { productId: 'P_939995' },
     { productId: 'P_1111111' },
     { productId: 'P_7296073409441_42' },
+    { productId: 'P_ABC' },
     { productId: 'P_7290102398065', quantity: 1.5 },
   ] }, { cache: new SearchCache() });
 
   assert.deepEqual(store.calls, [], 'a dry run sends nothing to the adapter');
   assert.deepEqual(out.results.map((r) => r.status === 'rejected' ? r.code : r.status), [
-    'would-add', 'PRODUCT_NOT_FOUND', 'UNSUPPORTED_SELLING_METHOD', 'OUT_OF_STOCK', 'UNSUPPORTED_PRODUCT_ID', 'INVALID_QUANTITY',
+    'would-add', 'PRODUCT_NOT_FOUND', 'UNSUPPORTED_SELLING_METHOD', 'OUT_OF_STOCK', 'would-add', 'UNSUPPORTED_PRODUCT_ID', 'INVALID_QUANTITY',
   ]);
-  assert.deepEqual([out.requested, out.accepted, out.rejected, out.complete], [6, 1, 5, false]);
+  assert.deepEqual([out.requested, out.accepted, out.rejected, out.complete], [7, 2, 5, false]);
+  assert.equal(out.results[4].name, 'variant', 'a variant code matches its exact variant');
   assert.deepEqual([out.results[0].productId, out.results[0].priceSource], ['P_7290102398065', 'server']);
 });
 
