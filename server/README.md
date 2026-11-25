@@ -60,7 +60,7 @@ It returns JSON text like this:
 }
 ```
 
-- By default the results keep each store's relevance order, interleaved by `rank`. Sorting by unit price would put a cheap but irrelevant match first. The stores' fuzzy search pads short lists with unrelated products, so results that share no word with the query are left out and counted in `stores.<id>.unrelatedHidden`. When nothing matches, the store returns no results rather than unrelated ones: Rami Levy's search reads `בננות` (bananas) as `בנות` (girls) and answers with girls' socks. A Hebrew plural also matches by its stem (`בננות` → `בננ-`, so `בננה` counts). If nothing fits, the store is searched again in the singular (`בננה`), reported as `stores.<id>.retriedAs`. `compare_basket` uses the same filter, so an unrelated product never reaches its totals. Numbers, sizes and units in the query (`12`, `3%`, `ליטר`, `גרם`) do not count as a match, so `ביצים 12` does not return pickles sold 10–12 per jar and `מים 1.5 ליטר` does not return a 1.5 litre kettle. Words match from their start, optionally behind a one-letter prefix (`המים`), not anywhere inside another word. A query without Hebrew letters must match every word instead, and nothing is kept when no product does: an untranslated "lactose free milk" otherwise found FREE-brand snack bars. Number and barcode queries are not filtered. With `sortBy: "unitPrice"` each unit (`kg`, `L`, `pc`) is sorted by `pricePerUnit` as its own group, because a price per litre and a price per kilogram are not comparable. Groups come in the order they first appear by relevance, and items without a unit price come last.
+- By default the results keep each store's relevance order, interleaved by `rank`. Sorting by unit price would put a cheap but irrelevant match first. The stores' fuzzy search pads short lists with unrelated products, so results that share no word with the query are left out and counted in `stores.<id>.unrelatedHidden`. When nothing matches, the store returns no results rather than unrelated ones: Rami Levy's search reads `בננות` (bananas) as `בנות` (girls) and answers with girls' socks. A Hebrew plural also matches by its stem (`בננות` → `בננ-`, so `בננה` counts). If nothing fits, the store is searched again in the singular (`בננה`), reported as `stores.<id>.retriedAs`. `compare_basket` uses the same filter, so an unrelated product never reaches its totals. Numbers, sizes, units and packaging words in the query (`12`, `3%`, `ליטר`, `גרם`, `מארז`, `ארוז`) do not count as a match, and a query that finds nothing is retried without its packaging words (`בצל אדום ארוז` → `בצל אדום`), so `ביצים 12` does not return pickles sold 10–12 per jar and `מים 1.5 ליטר` does not return a 1.5 litre kettle. Words match from their start, optionally behind a one-letter prefix (`המים`), not anywhere inside another word. A query without Hebrew letters must match every word instead, and nothing is kept when no product does: an untranslated "lactose free milk" otherwise found FREE-brand snack bars. Number and barcode queries are not filtered. With `sortBy: "unitPrice"` each unit (`kg`, `L`, `pc`) is sorted by `pricePerUnit` as its own group, because a price per litre and a price per kilogram are not comparable. Groups come in the order they first appear by relevance, and items without a unit price come last.
 - `priceBasis` says what `price` buys: `unit`, `kg`, or `package`, which is packaged produce charged by actual weight and marked `priceEstimated: true`. Shufersal's weighed items, including packages described as מחיר לפי משקל (price by weight), are `kg` when Shufersal's own per-kg comparison price equals the price, or when a per-kg offer (`ב- 69.90 ₪ לק"ג`) explains the difference. In that case `price` already includes the offer, and `regularPrice` is the price without it.
 - A query without Hebrew letters that is not a barcode gets a `hint` to translate it, because both catalogs are Hebrew.
 - `size` is read from Shufersal's unit field, or else from the product name, for example `2 ליטר`, `1 ל'`, `6*200 מ"ל` or `500 גרם`. It is always shown in liters or kilograms. `null` means the size could not be read, and no value is guessed.
@@ -103,7 +103,7 @@ Each offer's `lineTotal` is price × quantity. A fractional quantity means kilog
 
 The result contains:
 
-- `items`: each item's chosen offers per store, with `cheapestStore`. An item searched by barcode (a pinned barcode or a saved preference) is reported with `searchedBy: "barcode"` and its saved query, or else the preference name, as `query`; the barcode itself is in `barcode`. A plural query whose only match in a store is a variant (cherry tomatoes for `עגבניות`) is searched again there in the singular, so the plain product (`עגבניה`, per kg) is preferred. It is `null` for an item marked `notEquivalent`, because different amounts of different products have no cheaper store.
+- `items`: each item's chosen offers per store, with `cheapestStore`. An item searched by barcode (a pinned barcode or a saved preference) is reported with `searchedBy: "barcode"` and its saved query, or else the preference name, as `query`; the barcode itself is in `barcode`. A plural query whose only match in a store is a variant (cherry tomatoes for `עגבניות`) is searched again there in the singular, so the plain product (`עגבניה`, per kg) is preferred. The same retry runs without packaging words when no product matches every word: Rami Levy answers `בצל אדום ארוז` with onion rings, but `בצל אדום` with red onions. It is `null` for an item marked `notEquivalent`, because different amounts of different products have no cheaper store.
 - `totals`: each store's total, the number of items found and the `missing` queries.
 - `comparable`: totals over only the items every store has **like for like**, with `cheaperStore` and `difference`. This is the fair comparison. An item whose products differ in pack size (`0.5 kg vs 1 kg`), count (`18 vs 12 units`) or how they are sold (`kg vs unit`, `package vs unit`), or whose offer carries an `unrequested` variant, is marked `notEquivalent` and listed in `comparable.leftOut` with the reason. A price per kilogram, per item and per estimated package buy different amounts, so their bases must be the same. It still counts in each store's own total. Sizes that cannot be read on both sides are not treated as different.
 - Shufersal packaged produce (BY_PACKAGE with a weight range, such as tomatoes at 900–1100 g) is priced per kilogram, so it compares with Rami Levy's per-kg produce. The offer carries `packWeightKg` (the midpoint), `packPrice` and `packs`: the quantity in kg divided by the pack weight, rounded half up, at least one. `lineTotal` is packs × packPrice. Pass `packs` as the quantity to `add_basket_to_cart`.
@@ -250,6 +250,27 @@ The server keeps its state in SQLite, `grocery.db` under `GROCERY_DATA_DIR` (the
 
 Every tool call is written to `audit_log`: the tool, the store account, the outcome code, the duration and a short summary, never secrets or addresses. Entries are kept for 400 days. If the database cannot be opened, the server logs why and keeps working from the older preference and price files.
 
+## Account page
+
+With `GROCERY_ACCOUNT_HTTP` set (HTTP mode only), the server also serves `/account`: the owner's profile, delivery address and store logins. It is a server-rendered page in `src/web/`, with no JavaScript.
+
+- **Profile and address:** the phone number and the address line (house, apartment, floor, entrance, notes) are encrypted with the master key. Name, email, city and street stay readable for delivery-zone lookups.
+- **Store logins:** each store account shows its status (`From the server settings`, `Connected`, `Expires soon`, `Expired`, `Needs attention`, `Not connected`), its expiry and its last check.
+  - Rami Levy is connected by pasting DevTools' "Copy as cURL" of a logged-in request, the same input as `scripts/set_rami_levy_tokens.py`. Only the tokens are kept, encrypted in the store account.
+  - Disconnect deletes the saved login.
+  - A login saved here replaces the `.env` one for that store: the adapter's environment is updated and the adapter restarts on its next call. The login warnings follow the new expiry.
+  - Connecting Shufersal from the page comes next. Its login still comes from `.env`.
+- **No sign-in yet** (sign-in comes with OAuth), so the listener is the protection:
+  - It refuses to start on anything but loopback or the tailnet (100.64.0.0/10, fd7a:115c:a1e0::/48).
+  - It answers only to its own address, `localhost`, `127.0.0.1` and the names in `GROCERY_ACCOUNT_HOSTS`, which blocks DNS rebinding.
+  - Every form carries a CSRF token and is refused from another origin.
+  - Responses send a strict Content-Security-Policy and `Cache-Control: no-store`.
+- **Opening it from a computer that is not on the tailnet:** tunnel through SSH to the server, then open `http://localhost:8795/account`:
+
+  ```sh
+  ssh -N -L 8795:<tailnet address>:8795 <server>
+  ```
+
 ## Errors
 
 Errors from the server's own tools are JSON with a stable code:
@@ -308,6 +329,8 @@ The adapters read their own variables, listed in the root `.env.example`. The se
 | `GROCERY_MASTER_KEY` | unset | Master key for encrypted values, `1:<32 bytes base64>`; keep it only in the server's environment |
 | `GROCERY_MASTER_KEYS_OLD` | unset | Retired master keys, comma-separated, still used to open older values |
 | `GROCERY_OWNER_EMAIL` | unset | Email recorded on the owner, the first person in the database |
+| `GROCERY_ACCOUNT_HTTP` | unset | `host:port` for the account page; loopback or a tailnet address only |
+| `GROCERY_ACCOUNT_HOSTS` | unset | Extra host names the account page answers to, comma-separated |
 | `GROCERY_HISTORY_FILE` | `$GROCERY_DATA_DIR/price-history.db` | Price history file, used only when the database is unavailable, and by the tests |
 | `GROCERY_PRICE_HISTORY` | on | `off` stops recording prices and hides `price_history` |
 | `GROCERY_HTTP` | unset, which means stdio | Serve Streamable HTTP on `port` or `host:port`. The host defaults to `127.0.0.1`. |
@@ -367,6 +390,8 @@ The tests use stand-in adapters from `test/fixtures/`, so they need no credentia
 | `src/bridge.js` | stdio-to-HTTP relay for clients such as Claude Desktop |
 | `src/order.js` | `add_basket_to_cart`: one bulk add per store |
 | `src/preferences.js` | Household preference store and its three tools |
+| `src/web/` | The account page: profile, address and store logins, with its listener guard, CSRF and page markup |
+| `src/rami-curl.js` | Reads a Rami Levy login from DevTools' "Copy as cURL" |
 | `src/db/` | Database: migrations, encryption vault, people and store accounts, preferences, audit log, and the import of older files |
 | `src/history.js` | Price history: SQLite recording, `price_history` and the daily preference tracker |
 | `src/version.js` | Version from `package.json`, and build info: commit, build date, image tag and upstream commits |

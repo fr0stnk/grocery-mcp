@@ -12,6 +12,9 @@ const EXPANSIONS = [
 ];
 // Sizes and units say how much, not what the product is ("ליטר" matched kettles for "מים 1.5 ליטר").
 const UNIT_WORDS = new Set(['ליטר', 'ליט', 'לי', 'מל', 'גרם', 'גר', 'קילו', 'קג', 'יח', 'יחי', 'יחידה', 'יחידות', 'ml', 'kg', 'gr']);
+// Packaging says how a product is sold, not what it is: "מארז" made lettuce and pitas a match for "מארז ענבים".
+const PACKAGING_WORDS = new Set(['מארז', 'מארזי', 'ארוז', 'ארוזה', 'ארוזים', 'ארוזות', 'אריזה', 'אריזת', 'שקית', 'שקיות', 'מגש', 'מגשית', 'רשת', 'סלסלה', 'סלסלת', 'קופסה', 'קופסת']);
+const isPackaging = (w) => PACKAGING_WORDS.has(w) || PACKAGING_WORDS.has(w.replace(HEBREW_PREFIX, ''));
 const GRADE = /^(xs|s|m|l|xl|xxl)$/i;
 const HEBREW_PREFIX = /^[והבלמשכ](?=[֐-׿]{3})/u;
 
@@ -59,12 +62,19 @@ const bareOf = (w) => w.replace(HEBREW_PREFIX, '');
  */
 export function queryTerms(query) {
   return wordsOf(query)
-    .filter((w) => !/\d/.test(w) && !UNIT_WORDS.has(w) && !GRADE.test(w))
+    .filter((w) => !/\d/.test(w) && !UNIT_WORDS.has(w) && !GRADE.test(w) && !isPackaging(w))
     .map((w) => {
       const bare = bareOf(w);
       // A leading ב/ה/ו may be a prefix ("בחלב") or part of the word ("בננות"), so both readings count.
       return { word: w, forms: [...new Set([w, bare, stemOf(w), stemOf(bare)].filter(Boolean))] };
     });
+}
+
+/** The query without its packaging words, or null when it has none: "בצל אדום ארוז" → "בצל אדום". */
+export function withoutPackaging(query) {
+  const words = String(query).split(/\s+/).filter(Boolean);
+  const kept = words.filter((w) => !isPackaging(w.replace(/["'״׳]/g, '')));
+  return kept.length && kept.length < words.length ? kept.join(' ') : null;
 }
 
 /** Whether a name word is a form of a query term: the word itself, an inflection of it, or it behind a one-letter prefix. */
@@ -88,7 +98,7 @@ export function matchedTerms(item, terms) {
  * does not ask for (`unrequested`).
  */
 export function scoreOf(item, terms, query) {
-  const words = wordsOf(item.name ?? '');
+  const words = wordsOf(item.name ?? '').filter((w) => !isPackaging(w));
   const queryWords = wordsOf(query);
   const asked = new Set([...queryWords, ...queryWords.map(bareOf)]);
   const head = terms.length > 0 && words.slice(0, 2).some((w) => wordMatches(terms[0], w));

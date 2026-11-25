@@ -1,7 +1,7 @@
 import { createLimiter, SearchCache } from './cache.js';
 import { compareItems, StoreError } from './normalize.js';
 import { withTimeout } from './stores.js';
-import { matchedTerms, queryTerms, stemOf } from './match.js';
+import { matchedTerms, queryTerms, stemOf, withoutPackaging } from './match.js';
 
 /** Shared by every request in this process; see cache.js for the freshness rules. */
 export const searchCache = new SearchCache();
@@ -178,13 +178,15 @@ export function singularQueries(query) {
 
 /**
  * A store's results for a query with unrelated products removed. When nothing
- * fits, a Hebrew plural is retried in the singular (`retriedAs`).
+ * fits, the query is retried without packaging words and a Hebrew plural in the
+ * singular (`retriedAs`).
  */
 export async function relevantSearch(store, query, opts = {}) {
   const hit = await searchStore(store, query, opts);
   const { kept, hidden } = relevantOnly(hit.value, query);
   if (kept.length) return { hit, items: kept, hidden };
-  for (const alt of singularQueries(query)) {
+  const bare = withoutPackaging(query);
+  for (const alt of [...new Set([bare, ...singularQueries(bare ?? query)].filter(Boolean))]) {
     const retry = await searchStore(store, alt, opts).catch(() => null);
     const again = retry ? relevantOnly(retry.value, query) : { kept: [] };
     if (again.kept.length) return { hit: retry, items: again.kept, hidden, retriedAs: alt };

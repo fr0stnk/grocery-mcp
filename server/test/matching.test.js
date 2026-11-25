@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import { compareBasket, constraintsOf, fitOf, packsFor, pickMatches, statedIn } from '../src/basket.js';
 import { normalizeRamiCatalog, normalizeShufersalRaw } from '../src/normalize.js';
 import { SearchCache } from '../src/cache.js';
-import { bestCandidates, queryTerms } from '../src/match.js';
+import { bestCandidates, queryTerms, withoutPackaging } from '../src/match.js';
 import { relevantOnly } from '../src/search.js';
 
 // Live search results from both stores on 2026-11-25, as search_all_stores returned them (limit 20).
@@ -157,4 +157,22 @@ test('GROC-007: a plural query falls back to the singular where the plural finds
   searched.length = 0;
   await compareBasket([rami], { items: [{ query: 'עגבניה', quantity: 1 }] }, { cache: new SearchCache() });
   assert.deepEqual(searched, ['עגבניה'], 'a singular query with a plain match searches once');
+});
+
+test('GROC-015: packaging words are not product words, and a store is retried without them', async () => {
+  assert.deepEqual(queryTerms('בצל אדום ארוז').map((t) => t.word), ['בצל', 'אדום']);
+  assert.equal(withoutPackaging('מארז תפוחים סמיט'), 'תפוחים סמיט');
+  assert.equal(withoutPackaging('חלב 3%'), null);
+  const rami = (id, name, price, extra = {}) => ({ store: 'rami-levy', productId: id, name, price, priceBasis: 'unit', ...extra });
+  const catalog = {
+    'בצל אדום ארוז': [rami('300330', 'טבעות בצל קפואות', 14.9), rami('500', 'עוף טרי ארוז', 30)],
+    'בצל אדום': [rami('78', 'בצל אדום', 6.9, { priceBasis: 'kg' })],
+    'מארז תפוחים סמיט': [rami('423294', 'מארז 3יח מיץ תפוחים', 12), rami('9', 'מארז פיתות', 8), rami('18', 'תפוח עץ ירוק גרנד סמיט', 12.9, { priceBasis: 'kg' })],
+    'מארז ענבים': [rami('471702', 'מארז פיתות', 8), rami('7', 'מארז עלי חסה ערבית', 9.9)],
+    'ענבים': [],
+  };
+  const store = { id: 'rami-levy', label: 'Rami Levy', search: { maxLimit: 20, run: async ({ query }) => catalog[query] ?? [] } };
+  const out = await compareBasket([store], { items: ['בצל אדום ארוז', 'מארז תפוחים סמיט', 'מארז ענבים'].map((query) => ({ query, quantity: 1 })) }, { cache: new SearchCache() });
+  const [onion, apples, grapes] = out.items.map((l) => l.offers['rami-levy']?.productId ?? null);
+  assert.deepEqual([onion, apples, grapes], ['78', '18', null], 'red onion, Smith apples, and no lettuce or pitas for grapes');
 });

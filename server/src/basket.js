@@ -1,4 +1,4 @@
-import { bestCandidates } from './match.js';
+import { bestCandidates, matchedTerms, queryTerms, withoutPackaging } from './match.js';
 import { parseCount, parseSize, shufersalBarcode, StoreError } from './normalize.js';
 import { relevantOnly, relevantSearch, searchCache, searchStore, selectStores, singularQueries, storeStatus } from './search.js';
 
@@ -444,16 +444,19 @@ export async function compareBasket(stores, args = {}, { timeoutMs = 45_000, cac
     }),
   );
 
-  // A plural query whose best match in a store is a variant (cherry tomatoes for "עגבניות") also tries the
-  // singular there, where stores often list the plain product ("עגבניה", sold per kg).
+  // When a store has no plain match for every word of the query, it is searched again with simpler forms:
+  // without packaging words (Rami Levy answers "בצל אדום ארוז" with onion rings but "בצל אדום" with red onions)
+  // and in the singular (cherry tomatoes for "עגבניות", loose "עגבניה" per kg).
   const singular = new Map();
   await Promise.all(
     items.filter((it) => !it.barcode).flatMap((it) => selected.map(async (s) => {
-      const forms = singularQueries(it.query);
+      const bare = withoutPackaging(it.query);
+      const forms = [...new Set([bare, ...singularQueries(bare ?? it.query)].filter(Boolean))];
       const list = searches.get(`${s.id}|${it.query}`)?.hit?.value ?? [];
       if (!forms.length) return;
       const best = bestCandidates(usable(list), it.query);
-      if (best.length && !best[0].unrequested) return;
+      const terms = queryTerms(it.query);
+      if (best.length && !best[0].unrequested && matchedTerms(best[0], terms) === terms.length) return;
       for (const q of forms) {
         const hit = await relevantSearch(s, q, { timeoutMs, cache }).catch(() => null);
         const plain = hit ? relevantOnly(hit.items, it.query).kept : [];
