@@ -46,7 +46,7 @@ export function migrate(db, migrations = MIGRATIONS) {
       db.exec('COMMIT');
     } catch (error) {
       db.exec('ROLLBACK');
-      throw new Error(`migration ${m.version} (${m.name}) failed: ${error.message}`);
+      throw new Error(`migration ${m.version} (${m.name}) failed: ${error.message}`, { cause: error });
     }
   }
   return done;

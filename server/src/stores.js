@@ -49,7 +49,7 @@ export class StoreClient {
       await withTimeout(client.connect(transport), this.connectTimeoutMs, `${this.label} did not start within ${this.connectTimeoutMs / 1000}s`);
     } catch (error) {
       await client.close().catch(() => {});
-      throw new Error(`${this.label} failed to start: ${this.#reason(error)}`);
+      throw new Error(`${this.label} failed to start: ${this.#reason(error)}`, { cause: error });
     }
     this.client = client;
     this.instructions = client.getInstructions() ?? null;
@@ -78,7 +78,7 @@ export class StoreClient {
     try {
       return await client.callTool({ name, arguments: args }, undefined, { timeout: timeoutMs });
     } catch (error) {
-      if (!this.client) throw new Error(`${this.label} stopped: ${this.#reason(error)}`);
+      if (!this.client) throw new Error(`${this.label} stopped: ${this.#reason(error)}`, { cause: error });
       throw error;
     }
   }
