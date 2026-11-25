@@ -1,6 +1,7 @@
 import { createLimiter, SearchCache } from './cache.js';
 import { compareItems, StoreError } from './normalize.js';
 import { withTimeout } from './stores.js';
+import { matchedTerms, queryTerms, stemOf } from './match.js';
 
 /** Shared by every request in this process; see cache.js for the freshness rules. */
 export const searchCache = new SearchCache();
@@ -136,42 +137,31 @@ export async function searchAllStores(stores, args = {}, { timeoutMs = 45_000, c
   return { query, sortBy, ...(hint ? { hint } : {}), stores: status, sameProduct: groupByBarcode(results), results };
 }
 
-const HEBREW_PREFIX = /^[והבלמשכ](?=[\u0590-\u05FF]{3})/u;
-const wordsOf = (text) => String(text).toLocaleLowerCase().replace(/["'״׳()\-,.]/g, ' ').split(/\s+/).filter((w) => w.length >= 2 || /\d/.test(w));
-
 /**
  * The stores' fuzzy search fills short result lists with unrelated products
  * (beef tongue for "frozen salmon fillet"). Results sharing no word with the
  * query are dropped, even when that leaves nothing: Rami Levy's search reads
  * "בננות" (bananas) as "בנות" (girls) and answers with girls' socks. A Hebrew
- * plural also matches by its stem (בננות, בננ-), so "בננה" counts. Barcode and
- * number queries are not filtered.
+ * plural also matches by its stem (בננות, בננ-), so "בננה" counts. Words are
+ * matched from their start, and sizes and units do not count: "ליטר" alone
+ * made kettles a match for "מים 1.5 ליטר". Barcode and number queries are not
+ * filtered.
  * The catalogs are Hebrew, so a query with no Hebrew letters (a brand such as
  * "milka", or an untranslated "lactose free milk") must match every word, and
  * nothing is kept when no product does: one shared English word is not a match.
  */
 export function relevantOnly(items, query) {
   if (/^\d+$/.test(query.trim())) return { kept: items, hidden: 0 };
-  // Numbers and sizes ("12", "3%", "500") say nothing about what the product is.
-  const words = wordsOf(query).filter((w) => !/\d/.test(w)).map((w) => {
-    const bare = w.replace(HEBREW_PREFIX, '');
-    // A leading ב/ה/ו may be a prefix ("בחלב") or part of the word ("בננות"), so both readings count.
-    return [w, bare, stemOf(w), stemOf(bare)];
-  });
-  if (!words.length) return { kept: items, hidden: 0 };
+  const terms = queryTerms(query);
+  if (!terms.length) return { kept: items, hidden: 0 };
   const foreign = !/[\u0590-\u05FF]/.test(query);
   const related = (item) => {
+    if (!foreign) return matchedTerms(item, terms) > 0;
     const text = `${item.name} ${item.brand ?? ''}`.toLocaleLowerCase();
-    const has = (forms) => forms.some((f) => f && text.includes(f));
-    return foreign ? words.every(has) : words.some(has);
+    return terms.every((t) => t.forms.some((f) => text.includes(f)));
   };
   const kept = items.filter(related);
   return { kept, hidden: items.length - kept.length };
-}
-
-/** A Hebrew plural's stem: בננות → בננ, תפוחים → תפוח. Short words are left alone. */
-function stemOf(word) {
-  return /^[\u0590-\u05FF]{3,}(ות|ים)$/u.test(word) ? word.slice(0, -2) : null;
 }
 
 /** Singular forms to retry a plural query with: בננות → בננה, עגבניות → עגבניה, תפוחים → תפוח. */

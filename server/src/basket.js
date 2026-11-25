@@ -1,3 +1,4 @@
+import { bestCandidates } from './match.js';
 import { parseCount, parseSize, shufersalBarcode, StoreError } from './normalize.js';
 import { relevantSearch, searchCache, searchStore, selectStores, storeStatus } from './search.js';
 
@@ -11,10 +12,13 @@ export const BASKET_TOOL = {
   description:
     'Price a whole shopping list in Shufersal and Rami Levy and say which store is cheaper. Give each item as a Hebrew search query ' +
     '(translate Russian or English) with a quantity; optionally pin an exact product with a barcode from earlier results. ' +
-    'For each item the tool picks a product with the same barcode in every store when one exists (identical: true); otherwise each store\'s most ' +
-    'relevant in-stock result (identical: false, so say the products differ). Rami Levy multi-buy promotions are applied when the quantity qualifies; ' +
-    'club-only offers are listed but not applied. Returns per-store totals with missing items, a fair comparison over items both stores have, ' +
-    'and the total if each item is bought where it is cheapest. Delivery fees and minimum orders are not included. ' +
+    'Sizes, counts, egg grades and percentages in the query (1 ליטר, 12, L, 3%) must hold; a store with no such product lists the item as missing. ' +
+    'Of the products that name what was asked for, the tool picks one with the same barcode in every store when one exists (identical: true); otherwise each store\'s ' +
+    'closest in-stock match (identical: false, so say the products differ). Variants the query does not mention (Diet, Zero, flavoured, frozen, wholegrain, a six-pack) ' +
+    'are avoided; when a store has only such a product it is marked unrequested, so ask the user before treating it as the item. Rami Levy multi-buy promotions are applied when the quantity qualifies; ' +
+    'club-only offers are listed but not applied. Returns per-store totals with missing items, a fair comparison over items both stores have like for like, ' +
+    'and the total if each item is bought where it is cheaper. Items marked notEquivalent (different amounts, price bases or an unrequested variant) have no cheapestStore ' +
+    'and are left out of both, so never claim savings on them. Delivery fees and minimum orders are not included. ' +
     'For weighed items (soldByWeight) the quantity is in kilograms. Items may name a saved household preference instead of a query, ' +
     'and usual: true adds every preference in the usual basket. ' +
     'To price a past order in every store ("what would last week\'s order cost at Rami Levy?"), pass source: {store, order: "latest" or an order code}; ' +
@@ -67,13 +71,14 @@ function usable(list) {
 }
 
 const GRADE = /^(xs|s|m|l|xl|xxl)$/i;
+const PERCENT = /(\d+(?:[.,]\d+)?)\s*%/u;
 // How far down each store's list a product sold in every store may be to win.
 const SHARED_TOP = 3;
 
 /**
  * What the query pins down beyond its words: a pack size ("1 ליטר"), a count
- * ("ביצים 12") and an egg-style grade ("L"). Products that contradict any of
- * them are not the requested item.
+ * ("ביצים 12"), an egg-style grade ("L") and a fat or content percentage
+ * ("חלב 3%"). Products that contradict any of them are not the requested item.
  */
 export function constraintsOf(query) {
   const text = String(query ?? '');
@@ -81,10 +86,12 @@ export function constraintsOf(query) {
   const withoutSize = size ? text.replace(/(\d+(?:[.,]\d+)?)\s*\S+/u, ' ') : text;
   const countMatch = /(?:^|\s)(\d{1,3})(?:\s*(?:יחידות|יח'?))?(?=$|\s)/u.exec(withoutSize);
   const grade = text.split(/\s+/).find((w) => GRADE.test(w));
+  const percent = PERCENT.exec(text);
   return {
     ...(size ? { size } : {}),
     ...(countMatch && !size ? { count: Number(countMatch[1]) } : {}),
     ...(grade ? { grade: grade.toUpperCase() } : {}),
+    ...(percent ? { percent: Number(percent[1].replace(',', '.')) } : {}),
   };
 }
 
@@ -113,6 +120,11 @@ export function fitOf(product, constraints) {
     if (!grades.length) unknown = true;
     else if (!grades.includes(constraints.grade)) return `grade ${grades.join('/')}, not ${constraints.grade}`;
   }
+  if (constraints.percent != null) {
+    // Strict: a product that states no percentage is not taken for "חלב 99%".
+    const stated = [...String(product.name ?? '').matchAll(new RegExp(PERCENT, 'gu'))].map((m) => Number(m[1].replace(',', '.')));
+    if (!stated.includes(constraints.percent)) return stated.length ? `${stated.join('/')}%, not ${constraints.percent}%` : `no percentage stated, not ${constraints.percent}%`;
+  }
   return unknown ? 'unknown' : 'match';
 }
 
@@ -130,13 +142,18 @@ function fitting(list, constraints) {
 
 /**
  * Chooses one product per store for an item. A pinned barcode must match
- * exactly. Otherwise a barcode found among the top three results of every
- * store wins, preferring the one ranked highest by the stores' own relevance;
- * failing that, each store's first usable result.
+ * exactly. Otherwise each store's candidates are narrowed to those fitting the
+ * query's constraints and words best (see bestCandidates), and to products
+ * sold by weight when `preferKg` is set and there are any. A barcode found
+ * among the top three of every store then wins, preferring the one ranked
+ * highest by the stores' own relevance; failing that, each store's first
+ * candidate.
  */
-export function pickMatches(listsByStore, { barcode, constraints = {} } = {}) {
+export function pickMatches(listsByStore, { barcode, constraints = {}, query = '', preferKg = false } = {}) {
   const ids = Object.keys(listsByStore);
-  const lists = Object.fromEntries(ids.map((id) => [id, barcode ? usable(listsByStore[id] ?? []) : fitting(usable(listsByStore[id] ?? []), constraints).list]));
+  const kgFirst = (list) => (preferKg && list.some((x) => x.priceBasis === 'kg') ? list.filter((x) => x.priceBasis === 'kg') : list);
+  const narrow = (list) => kgFirst(bestCandidates(fitting(usable(list), constraints).list, query));
+  const lists = Object.fromEntries(ids.map((id) => [id, barcode ? usable(listsByStore[id] ?? []) : narrow(listsByStore[id] ?? [])]));
   if (barcode) {
     const matches = Object.fromEntries(ids.map((id) => [id, lists[id].find((x) => x.barcode === barcode) ?? null]));
     return { matches, identical: ids.length > 1 && ids.every((id) => matches[id]) };
@@ -191,6 +208,7 @@ function offer(match, quantity) {
     ...(match.size ? { size: match.size } : {}),
     ...(match.count ? { count: match.count } : {}),
     ...(match.fit ? { fit: match.fit } : {}),
+    ...(match.unrequested ? { unrequested: match.unrequested } : {}),
     ...lineCost(match, quantity),
     ...(clubOffer ? { clubOffer } : {}),
     ...(match.soldByWeight ? { soldByWeight: true } : {}),
@@ -201,15 +219,19 @@ const isPriced = (o) => Boolean(o && !o.excluded);
 
 /**
  * Whether different products are still like for like: 'match', or why not
- * ("0.5 kg vs 1 kg", "12 vs 18 units", "kg vs unit"). Only sizes that are
- * known on both sides can differ; unknown sizes count as a match.
+ * ("0.5 kg vs 1 kg", "12 vs 18 units", "package vs unit"). A price per kg, per
+ * item and per estimated package buy different amounts, so their bases must
+ * be the same. Only sizes that are known on both sides can differ; unknown
+ * sizes count as a match.
  */
 function equivalenceOf(offers) {
+  const variant = offers.find((o) => o.unrequested);
+  if (variant) return `${variant.name} is a variant that was not asked for (${variant.unrequested.join(', ')})`;
   if (offers.length < 2) return 'match';
   const [a, b] = offers;
-  const kg = (o) => (o.priceBasis ?? 'unit') === 'kg';
-  if (kg(a) !== kg(b)) return `${a.priceBasis ?? 'unit'} vs ${b.priceBasis ?? 'unit'}`;
-  if (kg(a)) return 'match';
+  const basis = (o) => o.priceBasis ?? 'unit';
+  if (basis(a) !== basis(b)) return `${basis(a)} vs ${basis(b)}`;
+  if (basis(a) !== 'unit') return 'match';
   if (a.count && b.count && a.count !== b.count) return `${a.count} vs ${b.count} units`;
   const sa = sizeOf(a);
   const sb = sizeOf(b);
@@ -386,11 +408,11 @@ export async function compareBasket(stores, args = {}, { timeoutMs = 45_000, cac
   );
 
   const lines = items.map((it) => {
-    // A fractional quantity is kilograms: where a store sells something per kg, choose among those.
-    const kgFirst = (list) => (!Number.isInteger(it.quantity) && list.some((x) => x.priceBasis === 'kg') ? list.filter((x) => x.priceBasis === 'kg') : list);
-    const lists = Object.fromEntries(selected.map((s) => [s.id, kgFirst(searches.get(`${s.id}|${it.query}`)?.hit?.value ?? [])]));
+    const lists = Object.fromEntries(selected.map((s) => [s.id, searches.get(`${s.id}|${it.query}`)?.hit?.value ?? []]));
     const constraints = it.barcode ? {} : constraintsOf(it.query);
-    let { matches, identical } = pickMatches(lists, { barcode: it.barcode, constraints });
+    // A fractional quantity is kilograms: among the right products, prefer those sold per kg.
+    const preferKg = !Number.isInteger(it.quantity);
+    let { matches, identical } = pickMatches(lists, { barcode: it.barcode, constraints, query: it.query, preferKg });
     const byName = new Set();
     for (const s of selected) {
       const pinned = it.pin?.[s.id];
@@ -400,7 +422,7 @@ export async function compareBasket(stores, args = {}, { timeoutMs = 45_000, cac
         matches = { ...matches, [s.id]: own };
         identical = false;
       } else if (!matches[s.id] && named.length) {
-        const pick = pickMatches({ [s.id]: named }).matches[s.id];
+        const pick = pickMatches({ [s.id]: named }, { query: it.fallbackQuery, preferKg }).matches[s.id];
         if (pick) {
           matches = { ...matches, [s.id]: pick };
           byName.add(s.id);
@@ -428,7 +450,8 @@ export async function compareBasket(stores, args = {}, { timeoutMs = 45_000, cac
       ...(it.barcode ? { barcode: it.barcode } : {}),
       identical,
       ...(identical ? { confidence: Object.values(offers).some((o) => o?.barcodeInferred) ? 'inferred' : 'exact' } : {}),
-      cheapestStore: cheapest(offers),
+      // Different amounts of different products have no cheaper store.
+      cheapestStore: equivalence && equivalence !== 'match' ? null : cheapest(offers),
       offers,
     };
   });
@@ -459,7 +482,9 @@ export async function compareBasket(stores, args = {}, { timeoutMs = 45_000, cac
     comparable.difference = round(ranked.at(-1)[1] - ranked[0][1]);
   }
 
-  const splitLines = lines.filter((l) => Object.values(l.offers).some(isPriced));
+  // The split buys each item where it is cheaper, which means nothing for items that are not like for like.
+  const splitLines = lines.filter((l) => Object.values(l.offers).some(isPriced) && !l.notEquivalent);
+  const splitLeftOut = lines.filter((l) => l.notEquivalent).map((l) => l.query);
   const split = round(splitLines.reduce((sum, l) => sum + Math.min(...Object.values(l.offers).filter(isPriced).map((o) => o.lineTotal)), 0));
   const commonSplit = round(common.reduce((sum, l) => sum + Math.min(...selected.map((s) => l.offers[s.id].lineTotal)), 0));
   const bestSingle = common.length ? Math.min(...selected.map((s) => comparable[s.id])) : null;
@@ -467,8 +492,9 @@ export async function compareBasket(stores, args = {}, { timeoutMs = 45_000, cac
   const notes = ['Delivery fees, minimum order amounts and club prices are not included.'];
   if (lines.some((l) => Object.values(l.offers).some((o) => o?.soldByWeight))) notes.push('For weighed items the quantity is kilograms and the price is per kilogram where the store says so.');
   if (lines.some((l) => !l.identical && Object.values(l.offers).filter(isPriced).length > 1)) notes.push('Items with identical: false compare different products; check that they are acceptable substitutes.');
-  if (lines.some((l) => l.notEquivalent)) notes.push('Items whose products differ in size, count or how they are sold (notEquivalent) are in each store\'s total but left out of comparable, which is like for like only.');
+  if (lines.some((l) => l.notEquivalent)) notes.push('Items whose products differ in size, count or how they are sold (notEquivalent) are in each store\'s total but have no cheapestStore and are left out of comparable and of the split total (split.leftOut); ask which product the user wants.');
   if (lines.some((l) => Object.values(l.offers).some((o) => o?.excluded))) notes.push('A fractional quantity is kilograms; products sold by unit or package cannot be priced for it and are listed in notComparable. Ask for whole units, or choose a product sold by weight.');
+  if (lines.some((l) => Object.values(l.offers).some((o) => o?.unrequested))) notes.push('Offers with unrequested are the closest product a store has, but carry a variant or pack the query did not ask for (Diet, flavoured, frozen, a six-pack); confirm them with the user.');
   if (lines.some((l) => Object.values(l.offers).some((o) => o?.fit === 'unverified'))) notes.push('Offers with fit: unverified could not be checked against the size, count or grade in the query; confirm them.');
   if (lines.some((l) => l.constraints && Object.values(l.offers).some((o) => !o))) notes.push('A store with no product matching the size, count or grade in the query lists the item as missing rather than offering a different one.');
   for (const [id, st] of Object.entries(status)) if (st.stale) notes.push(`${id} did not answer; its prices are cached from ${st.fetchedAt}.`);
@@ -484,6 +510,7 @@ export async function compareBasket(stores, args = {}, { timeoutMs = 45_000, cac
     comparable,
     split: {
       total: split,
+      ...(splitLeftOut.length ? { leftOut: splitLeftOut } : {}),
       ...(bestSingle != null && selected.length > 1 ? { savingsOnCommonItems: round(bestSingle - commonSplit) } : {}),
     },
     notes,

@@ -114,9 +114,9 @@ test('compareBasket reports a failing store and keeps the other', async () => {
 });
 
 test('constraintsOf reads size, count and grade, and fitOf rejects products that contradict them', () => {
-  assert.deepEqual(constraintsOf('חלב 3% 1 ליטר'), { size: { amount: 1, unit: 'L', label: '1 L' } });
+  assert.deepEqual(constraintsOf('חלב 3% 1 ליטר'), { size: { amount: 1, unit: 'L', label: '1 L' }, percent: 3 });
   assert.deepEqual(constraintsOf('ביצים 12 L'), { count: 12, grade: 'L' });
-  assert.deepEqual(constraintsOf('חלב 3%'), {}, 'a percentage is not a count');
+  assert.deepEqual(constraintsOf('חלב 3%'), { percent: 3 }, 'a percentage is not a count');
   const eggs = constraintsOf('ביצים 12 L');
   assert.equal(fitOf({ name: 'ביצים 12 יח גדול L' }, eggs), 'match');
   assert.equal(fitOf({ name: 'ביצים 18 יח L' }, eggs), '18 units, not 12');
@@ -141,7 +141,7 @@ test('compareBasket honours the requested size, count and grade (review G-01)', 
   const out = await compareBasket([store('shufersal'), store('rami-levy')], { items: [{ query: 'חלב 3% 1 ליטר', quantity: 2 }, { query: 'ביצים 12 L' }] }, { cache: new SearchCache() });
   const [milk, eggs] = out.items;
   assert.deepEqual([milk.identical, milk.offers.shufersal.productId, milk.offers['rami-levy'].productId], [true, 'P_1L', '10'], '1 L, not the 2 L ranked first');
-  assert.deepEqual(milk.constraints, { size: '1 L' });
+  assert.deepEqual(milk.constraints, { size: '1 L', percent: 3 });
   assert.equal(eggs.offers.shufersal, null, 'neither 18 L nor 12 M eggs are 12 L eggs');
   assert.equal(eggs.offers['rami-levy'].productId, '40');
   assert.deepEqual(out.totals.shufersal.missing, ['ביצים 12 L']);
