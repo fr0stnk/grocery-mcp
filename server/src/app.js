@@ -7,7 +7,7 @@ import { BASKET_TOOL, compareBasket } from './basket.js';
 import { ADD_BASKET_TOOL, addBasketToCart } from './order.js';
 import { PREFERENCE_TOOLS, runPreferenceTool } from './preferences.js';
 import { SEARCH_TOOL, searchAllStores } from './search.js';
-import { VERSION } from './version.js';
+import { BUILD, FULL_VERSION } from './version.js';
 
 const FORWARD_TIMEOUT_MS = 110_000;
 
@@ -16,6 +16,7 @@ export function buildInstructions(stores, { readOnly }) {
     'Grocery tools for two Israeli supermarkets: Shufersal and Rami Levy.',
     'Use search_all_stores to compare prices of one product type across stores. Identical products are matched by barcode in sameProduct; compare the rest by name, size and pricePerUnit, and say which items you treat as equivalent.',
     'For a shopping list, use compare_basket with all items at once: it returns each store\'s total, missing items, a fair comparison over items both stores have, and the split total. Mention items where identical is false, and that delivery fees are not included. To order, show the chosen store\'s list and pass its offers to add_basket_to_cart in one call instead of adding items one by one.',
+    'For questions about which version or commit is running, use server_info.',
     'Logins: when a result carries accountWarnings, tell the user in one short sentence and offer account_status for details and how to renew.',
     'Household preferences: list_preferences shows saved products (for example "milk" pinned to an exact barcode). Use them for "the usual milk" or "our usual basket" (compare_basket with usual: true). When the user picks a product they want again, offer to save it with save_preference, using its barcode.',
     'Language: users may write in Hebrew, Russian or English, and both store catalogs are in Hebrew. Search with Hebrew terms: use Hebrew requests as written, and translate Russian or English ones first (молоко / milk → חלב, яйца / eggs → ביצים, творог → קוטג\' or גבינה לבנה). If a search returns nothing, retry with a shorter or more common Hebrew term or a synonym before saying it is unavailable. Answer in the user\'s language. Show each product\'s Hebrew name as returned, with a short translation unless the user writes Hebrew, and prices in ₪.',
@@ -59,9 +60,34 @@ function describeCall(name, args, result) {
   return '';
 }
 
+const STARTED_AT = new Date();
+
+export const SERVER_INFO_TOOL = {
+  name: 'server_info',
+  title: 'Server version and build',
+  description:
+    'Report what is running: version, git commit, build time, image tag, the pinned store adapter commits, uptime, ' +
+    'read-only mode and each store\'s connection. Use it when the user asks which version or commit is deployed.',
+  annotations: { readOnlyHint: true },
+  inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+};
+
+export function serverInfo(stores, { readOnly }) {
+  return {
+    name: 'grocery-mcp',
+    ...BUILD,
+    fullVersion: FULL_VERSION,
+    startedAt: STARTED_AT.toISOString(),
+    uptimeSeconds: Math.round((Date.now() - STARTED_AT.getTime()) / 1000),
+    readOnly,
+    stores: Object.fromEntries(stores.map((s) => [s.id, { connected: Boolean(s.client), tools: s.tools?.length ?? 0 }])),
+  };
+}
+
 /** The server's own tools with their handlers; write tools are left out in read-only mode. */
 function ownTools(stores, preferences, monitor, { readOnly }) {
   const tools = [
+    [SERVER_INFO_TOOL, () => serverInfo(stores, { readOnly })],
     [ACCOUNT_TOOL, () => monitor.status(stores)],
     [SEARCH_TOOL, (args) => searchAllStores(stores, args)],
     [BASKET_TOOL, (args) => compareBasket(stores, args, { preferences })],
@@ -85,7 +111,7 @@ function withAccountWarnings(name, result, monitor) {
 
 export function createGroceryServer(stores, { readOnly = false, log = () => {}, preferences = null, monitor = new AccountMonitor() } = {}) {
   const server = new Server(
-    { name: 'grocery-mcp', version: VERSION },
+    { name: 'grocery-mcp', version: FULL_VERSION },
     { capabilities: { tools: { listChanged: true } }, instructions: buildInstructions(stores, { readOnly }) },
   );
 

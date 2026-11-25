@@ -42,6 +42,7 @@ services:
       - SHUFERSAL_USERNAME
       - SHUFERSAL_PASSWORD
       - GROCERY_STORES
+      - GROCERY_IMAGE_TAG
     volumes:
       - rami-data:/data/rami-levy
       - shufersal-data:/data/shufersal

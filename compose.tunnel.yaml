@@ -48,6 +48,7 @@ services:
       - SHUFERSAL_USERNAME
       - SHUFERSAL_PASSWORD
       - GROCERY_STORES
+      - GROCERY_IMAGE_TAG
       - GROCERY_READ_ONLY
       - GROCERY_HTTP=127.0.0.1:8791
     volumes:

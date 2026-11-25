@@ -91,6 +91,12 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Collect build metadata
+        id: build
+        run: |
+          echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+          echo "rami=$(git -C upstream/rami-levy-mcp rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "shufersal=$(git -C upstream/shufersal-cart rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - id: meta
         uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
         with:
@@ -108,5 +114,10 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            GROCERY_COMMIT=${{ github.sha }}
+            GROCERY_BUILD_DATE=${{ steps.build.outputs.date }}
+            GROCERY_UPSTREAM_RAMI_LEVY=${{ steps.build.outputs.rami }}
+            GROCERY_UPSTREAM_SHUFERSAL=${{ steps.build.outputs.shufersal }}
           cache-from: type=gha,scope=${{ matrix.target }}
           cache-to: type=gha,scope=${{ matrix.target }},mode=max

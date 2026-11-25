@@ -1,6 +1,6 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { VERSION } from './version.js';
+import { FULL_VERSION } from './version.js';
 
 const STDERR_TAIL = 2000;
 
@@ -41,7 +41,7 @@ export class StoreClient {
       for (const line of text.split('\n')) if (line.trim()) process.stderr.write(`[${this.id}] ${line}\n`);
     });
 
-    const client = new Client({ name: 'grocery-mcp', version: VERSION });
+    const client = new Client({ name: 'grocery-mcp', version: FULL_VERSION });
     client.onclose = () => {
       if (this.client === client) this.client = null;
     };

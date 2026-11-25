@@ -6,6 +6,7 @@ import { createStores } from './config.js';
 import { PreferenceStore } from './preferences.js';
 import { parseListen, startHttpServer } from './http.js';
 import { withTimeout } from './stores.js';
+import { BUILD, FULL_VERSION } from './version.js';
 
 const STARTUP_TIMEOUT_MS = 40_000;
 const log = (message) => process.stderr.write(`[grocery] ${message}\n`);
@@ -46,4 +47,4 @@ if (httpListen) {
 }
 
 const summary = stores.map((s) => `${s.id}=${s.tools ? `${s.tools.length} tools` : 'unavailable'}`).join(', ');
-log(`ready${readOnly ? ' (read-only)' : ''}: ${summary}`);
+log(`ready ${FULL_VERSION}${BUILD.buildDate ? ` built ${BUILD.buildDate}` : ''}${readOnly ? ' (read-only)' : ''}: ${summary}`);

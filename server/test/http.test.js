@@ -105,7 +105,7 @@ test('read-only mode lists only read tools and refuses writes', async () => {
   const { url } = await startHttp({ GROCERY_READ_ONLY: '1' });
   const client = await connect(url);
   const names = (await client.listTools()).tools.map((t) => t.name).sort();
-  assert.deepEqual(names, ['account_status', 'compare_basket', 'list_preferences', 'rami_levy_search_products', 'rami_levy_view_cart', 'search_all_stores']);
+  assert.deepEqual(names, ['account_status', 'compare_basket', 'list_preferences', 'rami_levy_search_products', 'rami_levy_view_cart', 'search_all_stores', 'server_info']);
   const refusedOwn = await client.callTool({ name: 'add_basket_to_cart', arguments: { store: 'shufersal', items: [{ productId: 'P_1' }] } });
   assert.match(refusedOwn.content[0].text, /read-only/);
   assert.match(client.getInstructions(), /read-only/);

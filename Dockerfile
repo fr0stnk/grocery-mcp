@@ -41,7 +41,17 @@ COPY --from=server-deps /app/node_modules /app/server/node_modules
 COPY --chown=node:node server/package.json /app/server/
 COPY --chown=node:node server/src /app/server/src
 RUN install -d -m 0700 -o node -g node /data/rami-levy /data/shufersal /data/grocery
-ENV GROCERY_DATA_DIR=/data/grocery \
+# Set by CI and reported by server_info, serverInfo and /health. Kept last so
+# they do not invalidate the cached layers above.
+ARG GROCERY_COMMIT=""
+ARG GROCERY_BUILD_DATE=""
+ARG GROCERY_UPSTREAM_RAMI_LEVY=""
+ARG GROCERY_UPSTREAM_SHUFERSAL=""
+ENV GROCERY_COMMIT=$GROCERY_COMMIT \
+    GROCERY_BUILD_DATE=$GROCERY_BUILD_DATE \
+    GROCERY_UPSTREAM_RAMI_LEVY=$GROCERY_UPSTREAM_RAMI_LEVY \
+    GROCERY_UPSTREAM_SHUFERSAL=$GROCERY_UPSTREAM_SHUFERSAL \
+    GROCERY_DATA_DIR=/data/grocery \
     RAMI_LEVY_DB_PATH=/data/rami-levy/cart.db \
     SHUFERSAL_COOKIE_FILE=/data/shufersal/cookies.json \
     SHUFERSAL_CHOICES_FILE=/data/shufersal/choices.json

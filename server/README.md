@@ -111,6 +111,23 @@ This tool adds several products to **one** store's real cart in a single call, u
 - **Rami Levy:** one `rami_levy_add_item` per product. Each call syncs the whole cart, and quantities are added to what is already there. The tool reports each item's result. After 90 seconds it stops starting new adds and reports the rest as not attempted, which keeps it inside the OpenAI tunnel's 120-second limit.
 - Nothing is ordered or paid. Checkout happens in the store's app or site.
 
+### `server_info` and version reporting
+
+`server_info` reports what is running:
+
+- `version`, plus `fullVersion`, which adds the short commit (`0.1.0+2f08eed`),
+- the full git `commit`,
+- `buildDate`,
+- `imageTag`,
+- the pinned `upstream` adapter commits,
+- `startedAt` and `uptimeSeconds`,
+- `readOnly`,
+- each store's connection.
+
+The same `fullVersion` is the `serverInfo.version` every MCP client receives when it connects, in semantic-versioning build-metadata form. `GET /health` returns `{ ok, version, commit, buildDate }`.
+
+Images get the commit, build time and upstream commits as build arguments from the image workflow. Compose passes `GROCERY_IMAGE_TAG` into the container. Local runs read the commits from git, and the values are `null` when neither source is available.
+
 ### `account_status` and login warnings
 
 `account_status` checks each store's login live, using Shufersal's `status` and Rami Levy's `check_status`. It reports `loggedIn` per store and when the Rami Levy token expires (`expiresAt`, `daysLeft`). For a failed login it also returns `howToRenew`.
@@ -190,7 +207,7 @@ The bridge connects to `GROCERY_BRIDGE_URL` (default `http://127.0.0.1:8791/mcp`
 With `GROCERY_HTTP=127.0.0.1:8791`, the server listens at `http://127.0.0.1:8791/mcp`:
 
 - It is stateless. Each `POST /mcp` gets a fresh MCP server and transport, and returns a JSON response. All requests share the same long-running store processes, so stores start once, not once per client.
-- `GET /health` returns `{"ok":true}`. Other paths return a plain-text 404, and other methods on `/mcp` return 405. The 404 is plain text because OpenAI's tunnel-client probes the `/.well-known/oauth-*` paths and tried to read a JSON 404 as OAuth metadata. Bodies are limited to 4 MiB.
+- `GET /health` returns `{"ok":true}` with the version, commit and build date. Other paths return a plain-text 404, and other methods on `/mcp` return 405. The 404 is plain text because OpenAI's tunnel-client probes the `/.well-known/oauth-*` paths and tried to read a JSON 404 as OAuth metadata. Bodies are limited to 4 MiB.
 - On a loopback address, requests whose `Host` header names another host are rejected with 403, which guards against DNS rebinding.
 - It keeps running when stdin closes, so it can run as a detached service. Stdio mode exits instead.
 - A request whose `MCP-Protocol-Version` header names a version the SDK does not support gets HTTP 400, as the MCP specification requires. ChatGPT's newer `server/discover` probe is sent that way and is answered with 400, after which ChatGPT falls back to `2025-11-25` and connects normally. With a supported version, `server/discover` gets the standard JSON-RPC "Method not found". Support arrives with an SDK update, which Dependabot proposes.
@@ -268,7 +285,7 @@ The tests use stand-in adapters from `test/fixtures/`, so they need no credentia
 | `src/bridge.js` | stdio-to-HTTP relay for clients such as Claude Desktop |
 | `src/order.js` | `add_basket_to_cart`: Shufersal bulk add, Rami Levy per-item adds with a time budget |
 | `src/preferences.js` | Household preference store and its three tools |
-| `src/version.js` | Reads the version from `package.json` |
+| `src/version.js` | Version from `package.json`, and build info: commit, build date, image tag and upstream commits |
 | `src/cache.js` | Search cache with stale fallback, and the per-store concurrency limiter |
 | `src/normalize.js` | Converts each store's results to the shared shape, and parses sizes, prices, barcodes and promotions |
 | `src/shufersal-search.js` | Direct Shufersal search with the adapter's saved session, read-only |

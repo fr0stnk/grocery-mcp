@@ -27,16 +27,27 @@ test('startHttpServer answers MCP requests in process', async () => {
   const res = await fetch(`${base}/mcp`, rpc({ jsonrpc: '2.0', id: 1, method: 'tools/list' }));
   assert.equal(res.status, 200);
   const names = (await res.json()).result.tools.map((t) => t.name);
-  assert.deepEqual(names, ['account_status', 'search_all_stores', 'compare_basket', 'add_basket_to_cart', 'list_preferences', 'save_preference', 'remove_preference']);
+  assert.deepEqual(names, ['server_info', 'account_status', 'search_all_stores', 'compare_basket', 'add_basket_to_cart', 'list_preferences', 'save_preference', 'remove_preference']);
 
   const init = await fetch(`${base}/mcp`, rpc({ jsonrpc: '2.0', id: 2, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 't', version: '0' } } }));
   const { version } = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
-  assert.deepEqual((await init.json()).result.serverInfo, { name: 'grocery-mcp', version });
+  const reported = (await init.json()).result.serverInfo;
+  assert.equal(reported.name, 'grocery-mcp');
+  assert.match(reported.version, new RegExp(`^${version.replaceAll('.', '\\.')}\\+[0-9a-f]{7}$`), 'version plus commit as build metadata');
+
+  const info = await fetch(`${base}/mcp`, rpc({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'server_info', arguments: {} } }));
+  const body = JSON.parse((await info.json()).result.content[0].text);
+  assert.deepEqual([body.version, body.fullVersion, body.readOnly, body.stores], [version, reported.version, false, {}]);
+  assert.match(body.commit, /^[0-9a-f]{40}$/);
+  assert.ok(body.uptimeSeconds >= 0 && body.startedAt);
 });
 
 test('startHttpServer rejects unknown paths, methods, bad JSON and foreign hosts', async () => {
   const { base } = await start();
-  assert.deepEqual(await (await fetch(`${base}/health`)).json(), { ok: true });
+  const health = await (await fetch(`${base}/health`)).json();
+  assert.equal(health.ok, true);
+  assert.match(health.commit, /^[0-9a-f]{40}$/);
+  assert.equal(typeof health.version, 'string');
   const missing = await fetch(`${base}/.well-known/oauth-protected-resource`);
   assert.deepEqual([missing.status, await missing.text()], [404, 'Not Found']);
   const get = await fetch(`${base}/mcp`);

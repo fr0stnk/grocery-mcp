@@ -1,5 +1,6 @@
 import http from 'node:http';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { BUILD } from './version.js';
 
 const MAX_BODY_BYTES = 4 * 1024 * 1024;
 
@@ -40,7 +41,7 @@ export function startHttpServer({ host, port, path = '/mcp', makeServer, log = (
 
   const httpServer = http.createServer(async (req, res) => {
     const { pathname } = new URL(req.url ?? '/', 'http://local');
-    if (pathname === '/health' && req.method === 'GET') return send(res, 200, { ok: true });
+    if (pathname === '/health' && req.method === 'GET') return send(res, 200, { ok: true, version: BUILD.version, commit: BUILD.commit, buildDate: BUILD.buildDate });
     if (pathname !== path) {
       // Plain text, not JSON: OAuth discovery clients such as OpenAI's
       // tunnel-client parse a JSON 404 from /.well-known/... as broken
