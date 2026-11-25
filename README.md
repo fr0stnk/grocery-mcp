@@ -115,6 +115,8 @@ RAMI_LEVY_COOKIE='cf_clearance=AbC...; _ga=GA1.1...; other=value'
 - `add_basket_to_cart` adds the chosen store's basket to its real cart in one step, with a dry-run preview. Nothing is ordered or paid.
 - `server_info` reports the running version and commit, build time, image tag and the pinned adapter commits. MCP clients also see `0.1.0+<commit>` as the server version, and `/health` includes it.
 - `account_status` checks both store logins live and shows when the Rami Levy token expires. Search and basket results carry `accountWarnings` from a week before expiry, or after a failed login, so the assistant tells you in the conversation.
+- `compare_basket` with `source` prices a past order in every store, for example the latest Shufersal order at Rami Levy's prices.
+- `price_history` shows a product's daily prices per store, its usual price, and whether today's promotion is a real discount. Prices are recorded from every search and from a daily check of saved preferences.
 - `list_preferences`, `save_preference` and `remove_preference` keep household products such as "milk = Tnuva 3% 1 L", pinned by barcode, on the server. `compare_basket` can then price "our usual basket". The data lives in the `grocery-data` volume.
 - Each store's own tools are forwarded with a store prefix, such as `shufersal_view_cart` and `rami_levy_add_item`. Carts are separate per store, and no tool checks out or pays.
 

@@ -159,3 +159,43 @@ test('Shufersal egg packs keep their count and a price per egg (review G-06)', (
   assert.deepEqual([eggs.size, eggs.count, eggs.pricePerUnit, eggs.perUnit], ['12 pcs', 12, 1.21, 'pc']);
 });
 
+test('compareBasket prices a past order: barcode first, name as fallback, grams as kilograms (review 5.2)', async () => {
+  const order = {
+    order: { code: '05782658', created: '2026-11-23 16:06', total: 749.17 },
+    items: [
+      { code: 'P_4131074', name: 'חלב בקרטון 3% שומן', quantity: 2, sellingMethod: 'BY_UNIT', unit: 'unit' },
+      { code: 'P_939995', name: 'פילה סלמון קפוא', quantity: 1150, sellingMethod: 'BY_PACKAGE', unit: 'g' },
+      { code: 'P_7290000000001', name: 'מוצר ייחודי', quantity: 1, sellingMethod: 'BY_UNIT', unit: 'unit' },
+    ],
+  };
+  const catalog = {
+    shufersal: {
+      '7290004131074': [p('shufersal', 'P_4131074', '7290004131074', 7.35)],
+      'פילה סלמון קפוא': [p('shufersal', 'P_939995', null, 69.9, { priceBasis: 'kg', soldByWeight: true })],
+      '7290000000001': [p('shufersal', 'P_7290000000001', '7290000000001', 12)],
+    },
+    'rami-levy': {
+      '7290004131074': [p('rami-levy', '3025', '7290004131074', 7.2)],
+      'פילה סלמון קפוא': [p('rami-levy', '417111', null, 81.4, { priceBasis: 'kg', soldByWeight: true })],
+      'מוצר ייחודי': [p('rami-levy', '900', null, 10)],
+    },
+  };
+  const calls = [];
+  const store = (id) => ({
+    id, label: id,
+    search: { maxLimit: 20, run: async ({ query }) => catalog[id][query] ?? [] },
+    callTool: async (tool, args) => { calls.push([id, tool, args]); return { content: [{ type: 'text', text: JSON.stringify(order) }] }; },
+  });
+  const out = await compareBasket([store('shufersal'), store('rami-levy')], { source: { store: 'shufersal' } }, { cache: new SearchCache() });
+  assert.deepEqual(calls, [['shufersal', 'get_order', { order: 'latest' }]]);
+  assert.deepEqual(out.source, { store: 'shufersal', order: '05782658', created: '2026-11-23 16:06', paid: 749.17 });
+  const [milk, salmon, unique] = out.items;
+  assert.deepEqual([milk.identical, milk.offers.shufersal.lineTotal, milk.offers['rami-levy'].lineTotal], [true, 14.7, 14.4]);
+  assert.deepEqual([salmon.quantity, salmon.offers.shufersal.lineTotal, salmon.offers['rami-levy'].lineTotal], [1.15, 80.39, 93.61]);
+  assert.deepEqual([unique.offers['rami-levy'].productId, unique.offers['rami-levy'].matchedBy, unique.identical], ['900', 'name', false]);
+  assert.equal(unique.sourceLine.code, 'P_7290000000001');
+  assert.ok(out.notes.some((n) => /Prices are today's/.test(n)) && out.notes.some((n) => /matchedBy: name/.test(n)));
+  await assert.rejects(compareBasket([store('shufersal')], {}, { cache: new SearchCache() }), /non-empty list/);
+  await assert.rejects(compareBasket([store('shufersal')], { source: { store: 'rami-levy' } }, { cache: new SearchCache() }), (e) => e.code === 'STORE_UNAVAILABLE');
+});
+

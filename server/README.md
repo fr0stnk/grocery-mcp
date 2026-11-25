@@ -102,6 +102,27 @@ The result contains:
 
 A store that fails is reported in `stores`, and the other store is still priced.
 
+#### Pricing a past order
+
+`source: { store, order }` prices a past order in every store: "what would last week's Shufersal order cost at Rami Levy?". `order` is `"latest"` (the default) or an order code from the store's `list_orders`. It can be combined with `items`.
+
+- Shufersal orders are read with its `get_order`, and Rami Levy's with `rami_levy_list_orders` and `rami_levy_view_order`.
+- Each line is searched by barcode when it has one, including the inferred `729000` barcode of Shufersal's 7-digit codes. A store that does not stock that barcode is searched by the product's name, and its offer is marked `matchedBy: "name"`.
+- The order's own store keeps the product that was bought.
+- Shufersal's weighed and packaged lines are in grams in the order history (frozen salmon `1150`), so they are compared in kilograms (`1.15`).
+- The result carries `source` (store, order code, date and the total paid then) and `sourceLine` on each item. A note says that prices are today's, and that the paid total included delivery and the actual weights.
+
+### `price_history`
+
+How a product's price changed, per store. Give a `barcode` (every store), a `store` with a `productId`, or a saved `preference`. `days` sets the period: 90 by default, at most 365.
+
+For each store's product the tool returns the daily `series` and `current` price (with any promotion), plus:
+- `lowest` and `highest`, with their days;
+- `usualPrice`, the median before the latest day, and `vsUsual`, today's price minus it. A promotion with `vsUsual` at 0 or above is not a real discount;
+- `isLowestSeen` and `change30Days`.
+
+Prices are recorded in `price-history.db` (SQLite) under `GROCERY_DATA_DIR`: one row per store, product and day, kept for 400 days. Every fresh search result is recorded, from any tool and any client. The HTTP server also searches every saved preference once a day, so the products the household buys build a history without anyone searching for them. A product that was never searched has no history yet.
+
 ### `add_basket_to_cart`
 
 This tool adds several products to **one** store's real cart in a single call, usually the chosen store's offers from `compare_basket`. The client then asks for confirmation once instead of once per item.
@@ -259,8 +280,10 @@ The adapters read their own variables, listed in the root `.env.example`. The se
 | `GROCERY_SHUFERSAL_SEARCH` | direct | Set to `adapter` to always search Shufersal through the adapter's tool |
 | `GROCERY_SHUFERSAL_ORIGIN` | `https://www.shufersal.co.il` | Shufersal origin override, used by the tests |
 | `GROCERY_RAMI_LEVY_CATALOG_URL` | Rami Levy's catalog API | Catalog endpoint override, used by the tests |
-| `GROCERY_DATA_DIR` | `<repo>/.data` locally, `/data/grocery` in Docker | Where `preferences.json` is kept |
+| `GROCERY_DATA_DIR` | `<repo>/.data` locally, `/data/grocery` in Docker | Where `preferences.json` and `price-history.db` are kept |
 | `GROCERY_PREFERENCES_FILE` | `$GROCERY_DATA_DIR/preferences.json` | Exact preferences file, used by the tests |
+| `GROCERY_HISTORY_FILE` | `$GROCERY_DATA_DIR/price-history.db` | Exact price history database, used by the tests |
+| `GROCERY_PRICE_HISTORY` | on | `off` stops recording prices and hides `price_history` |
 | `GROCERY_HTTP` | unset, which means stdio | Serve Streamable HTTP on `port` or `host:port`. The host defaults to `127.0.0.1`. |
 | `GROCERY_READ_ONLY` | off | When `1`, only tools annotated `readOnlyHint` are listed, and other forwarded tools are refused. `search_all_stores` always works. |
 
@@ -316,6 +339,7 @@ The tests use stand-in adapters from `test/fixtures/`, so they need no credentia
 | `src/bridge.js` | stdio-to-HTTP relay for clients such as Claude Desktop |
 | `src/order.js` | `add_basket_to_cart`: one bulk add per store |
 | `src/preferences.js` | Household preference store and its three tools |
+| `src/history.js` | Price history: SQLite recording, `price_history` and the daily preference tracker |
 | `src/version.js` | Version from `package.json`, and build info: commit, build date, image tag and upstream commits |
 | `src/cache.js` | Search cache with stale fallback, and the per-store concurrency limiter |
 | `src/normalize.js` | Converts each store's results to the shared shape, and parses sizes, prices, barcodes and promotions |

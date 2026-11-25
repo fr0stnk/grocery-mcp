@@ -6,7 +6,8 @@ import { ACCOUNT_TOOL, AccountMonitor } from './accounts.js';
 import { BASKET_TOOL, compareBasket } from './basket.js';
 import { ADD_BASKET_TOOL, addBasketToCart } from './order.js';
 import { PREFERENCE_TOOLS, runPreferenceTool } from './preferences.js';
-import { SEARCH_TOOL, searchAllStores } from './search.js';
+import { PRICE_HISTORY_TOOL, priceHistory } from './history.js';
+import { SEARCH_TOOL, searchAllStores, searchStore } from './search.js';
 import { BUILD, FULL_VERSION } from './version.js';
 
 const FORWARD_TIMEOUT_MS = 110_000;
@@ -84,8 +85,14 @@ export function serverInfo(stores, { readOnly }) {
   };
 }
 
+/** Each store's top search result for a query, for history of a preference saved without a barcode. */
+async function topIds(stores, query) {
+  const found = await Promise.allSettled(stores.map((s) => searchStore(s, query)));
+  return found.flatMap((f, i) => (f.status === 'fulfilled' && f.value.value[0] ? [{ store: stores[i].id, productId: f.value.value[0].productId }] : []));
+}
+
 /** The server's own tools with their handlers; write tools are left out in read-only mode. */
-function ownTools(stores, preferences, monitor, { readOnly }) {
+function ownTools(stores, preferences, monitor, { readOnly, history }) {
   const tools = [
     [SERVER_INFO_TOOL, () => serverInfo(stores, { readOnly })],
     [ACCOUNT_TOOL, () => monitor.status(stores)],
@@ -93,6 +100,7 @@ function ownTools(stores, preferences, monitor, { readOnly }) {
     [BASKET_TOOL, (args) => compareBasket(stores, args, { preferences })],
     [ADD_BASKET_TOOL, (args) => addBasketToCart(stores, args)],
     ...PREFERENCE_TOOLS.map((tool) => [tool, (args) => runPreferenceTool(preferences, tool.name, args)]),
+    ...(history ? [[PRICE_HISTORY_TOOL, (args) => priceHistory(history, args, { preferences, findIds: (q) => topIds(stores, q) })]] : []),
   ];
   return new Map(tools.filter(([tool]) => !readOnly || tool.annotations?.readOnlyHint === true).map(([tool, run]) => [tool.name, { tool, run }]));
 }
@@ -109,7 +117,7 @@ function withAccountWarnings(name, result, monitor) {
   return warnings.length ? { ...result, accountWarnings: warnings } : result;
 }
 
-export function createGroceryServer(stores, { readOnly = false, log = () => {}, preferences = null, monitor = new AccountMonitor() } = {}) {
+export function createGroceryServer(stores, { readOnly = false, log = () => {}, preferences = null, monitor = new AccountMonitor(), history = null } = {}) {
   const server = new Server(
     { name: 'grocery-mcp', version: FULL_VERSION },
     { capabilities: { tools: { listChanged: true } }, instructions: buildInstructions(stores, { readOnly }) },
@@ -123,12 +131,12 @@ export function createGroceryServer(stores, { readOnly = false, log = () => {}, 
   }
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: [...[...ownTools(stores, preferences, monitor, { readOnly }).values()].map((t) => t.tool), ...[...forwardedTools(stores, { readOnly }).values()].map((r) => r.listed)],
+    tools: [...[...ownTools(stores, preferences, monitor, { readOnly, history }).values()].map((t) => t.tool), ...[...forwardedTools(stores, { readOnly }).values()].map((r) => r.listed)],
   }));
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args = {} } = request.params;
-    const own = ownTools(stores, preferences, monitor, { readOnly }).get(name);
+    const own = ownTools(stores, preferences, monitor, { readOnly, history }).get(name);
     if (own) {
       try {
         const started = Date.now();
@@ -145,7 +153,7 @@ export function createGroceryServer(stores, { readOnly = false, log = () => {}, 
 
     const route = forwardedTools(stores, { readOnly }).get(name);
     if (!route) {
-      const hidden = readOnly && (forwardedTools(stores, { readOnly: false }).has(name) || ownTools(stores, preferences, monitor, { readOnly: false }).has(name));
+      const hidden = readOnly && (forwardedTools(stores, { readOnly: false }).has(name) || ownTools(stores, preferences, monitor, { readOnly: false, history }).has(name));
       const text = hidden ? `${name} changes data and this server is read-only.` : `Unknown tool: ${name}`;
       return { isError: true, content: [{ type: 'text', text }] };
     }

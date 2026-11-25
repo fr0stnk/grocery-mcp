@@ -43,10 +43,21 @@ export const SEARCH_TOOL = {
  * are cached per store, branch and query, and each store runs at most a few
  * searches at once.
  */
+let recorder = null;
+
+/** Every fresh (not cached) search result is passed to `record`, e.g. the price history. */
+export function recordSearchesWith(record) {
+  recorder = record;
+}
+
 export async function searchStore(store, query, { timeoutMs = 45_000, cache = searchCache } = {}) {
   store.limiter ??= createLimiter(PER_STORE_CONCURRENCY);
   const key = `${store.id}|${store.cacheKey ?? ''}|${query}`;
-  return cache.get(key, () => store.limiter(() => fetchStore(store, query, timeoutMs)));
+  return cache.get(key, async () => {
+    const items = await store.limiter(() => fetchStore(store, query, timeoutMs));
+    if (recorder) Promise.resolve().then(() => recorder(items)).catch((error) => process.stderr.write(`[grocery] price history not recorded: ${error.message}\n`));
+    return items;
+  });
 }
 
 async function fetchStore(store, query, timeoutMs) {

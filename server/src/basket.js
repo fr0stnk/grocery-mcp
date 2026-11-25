@@ -1,7 +1,8 @@
-import { parseCount, parseSize, StoreError } from './normalize.js';
+import { parseCount, parseSize, shufersalBarcode, StoreError } from './normalize.js';
 import { searchCache, searchStore, selectStores, storeStatus } from './search.js';
 
 const MAX_ITEMS = 40;
+const MAX_SOURCE_LINES = 80;
 const round = (n) => Math.round(n * 100) / 100;
 
 export const BASKET_TOOL = {
@@ -15,7 +16,10 @@ export const BASKET_TOOL = {
     'club-only offers are listed but not applied. Returns per-store totals with missing items, a fair comparison over items both stores have, ' +
     'and the total if each item is bought where it is cheapest. Delivery fees and minimum orders are not included. ' +
     'For weighed items (soldByWeight) the quantity is in kilograms. Items may name a saved household preference instead of a query, ' +
-    'and usual: true adds every preference in the usual basket. To order, pass the chosen store\'s offers to add_basket_to_cart.',
+    'and usual: true adds every preference in the usual basket. ' +
+    'To price a past order in every store ("what would last week\'s order cost at Rami Levy?"), pass source: {store, order: "latest" or an order code}; ' +
+    'its lines are matched by barcode where possible, otherwise by name (matchedBy: "name", so say the product may differ), with weighed quantities in kilograms. ' +
+    'To order, pass the chosen store\'s offers to add_basket_to_cart.',
   annotations: { readOnlyHint: true, openWorldHint: true },
   inputSchema: {
     type: 'object',
@@ -41,6 +45,16 @@ export const BASKET_TOOL = {
         description: 'Only compare these stores (default: all configured stores)',
       },
       usual: { type: 'boolean', description: 'Add every saved preference marked usual' },
+      source: {
+        type: 'object',
+        description: 'Price a past order instead of (or as well as) items',
+        properties: {
+          store: { type: 'string', enum: ['shufersal', 'rami-levy'] },
+          order: { type: 'string', minLength: 1, default: 'latest', description: '"latest" or an order code from the store\'s list_orders' },
+        },
+        required: ['store'],
+        additionalProperties: false,
+      },
     },
     additionalProperties: false,
   },
@@ -200,7 +214,7 @@ export function resolveItems(args, preferences) {
     const named = new Set(requested.map((it) => it?.preference?.trim().toLocaleLowerCase()).filter(Boolean));
     for (const p of usual) if (!named.has(p.name.toLocaleLowerCase())) requested.push({ preference: p.name });
   }
-  if (!requested.length) throw new StoreError('items must be a non-empty list, or set usual: true', 'INVALID_ARGUMENT');
+  if (!requested.length && !args.source) throw new StoreError('items must be a non-empty list, or set usual: true or a source order', 'INVALID_ARGUMENT');
   if (requested.length > MAX_ITEMS) throw new StoreError(`at most ${MAX_ITEMS} items per basket`, 'INVALID_ARGUMENT');
   return requested.map((it, i) => {
     let { query, barcode, quantity } = it ?? {};
@@ -222,9 +236,71 @@ export function resolveItems(args, preferences) {
   });
 }
 
+function parseToolText(result) {
+  const text = (result?.content ?? []).filter((c) => c.type === 'text').map((c) => c.text).join('\n');
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+}
+
+async function callStore(store, tool, args) {
+  const result = await store.callTool(tool, args);
+  const body = parseToolText(result);
+  if (result.isError || body?.ok === false) {
+    const why = typeof body === 'string' ? body : [body?.reason, body?.details ?? body?.message].filter(Boolean).join(': ');
+    throw new StoreError(`${store.label}: ${String(why || 'request failed').slice(0, 300)}`, /no order|not.?found|rejected/i.test(why) ? 'NOT_FOUND' : 'STORE_ERROR');
+  }
+  return body;
+}
+
+/**
+ * Turns a past order into basket items. Each line is searched by barcode when
+ * it has one (Shufersal's 7-digit codes give an inferred 729000 barcode) and
+ * otherwise by name; the order's own store keeps its product (`pin`).
+ * Shufersal reports weighed and packaged lines in grams, compared here in kg.
+ */
+export async function sourceItems(stores, source) {
+  const store = stores.find((s) => s.id === source?.store);
+  if (!store) throw new StoreError(`${source?.store} is not configured on this server`, 'STORE_UNAVAILABLE');
+  const order = typeof source.order === 'string' && source.order.trim() ? source.order.trim() : 'latest';
+  let info;
+  let lines;
+  if (store.id === 'shufersal') {
+    const body = await callStore(store, 'get_order', { order });
+    info = { store: store.id, order: body.order?.code ?? order, created: body.order?.created ?? null, paid: body.order?.total ?? null };
+    lines = (body.items ?? []).map((i) => {
+      const grams = i.unit === 'g' || (i.sellingMethod && i.sellingMethod !== 'BY_UNIT' && i.quantity >= 50);
+      const code = shufersalBarcode(i.code);
+      return { name: i.name, code: i.code, barcode: code.barcode ?? undefined, quantity: grams ? round3(i.quantity / 1000) : i.quantity, ...(grams ? { unit: 'kg' } : {}) };
+    });
+  } else {
+    let id = order;
+    if (order === 'latest') {
+      const list = await callStore(store, 'rami_levy_list_orders', { page: 1 });
+      id = list.orders?.[0]?.orderId;
+      if (id == null) throw new StoreError('Rami Levy has no past orders on this account', 'NOT_FOUND');
+    }
+    const body = await callStore(store, 'rami_levy_view_order', { orderId: String(id) });
+    info = { store: store.id, order: String(body.orderId ?? id), created: body.createdAt ?? null, paid: body.total ?? null };
+    lines = (body.lines ?? []).map((l) => ({ name: l.name, code: String(l.productId), quantity: Number(l.qty) || 1 }));
+  }
+  if (!lines.length) throw new StoreError(`order ${info.order} has no product lines`, 'NOT_FOUND');
+  if (lines.length > MAX_SOURCE_LINES) throw new StoreError(`order ${info.order} has more than ${MAX_SOURCE_LINES} lines`, 'INVALID_ARGUMENT');
+  const items = lines
+    .filter((l) => l.name && l.quantity > 0 && l.quantity <= 100)
+    .map((l) => ({ query: l.barcode ?? l.name, quantity: l.quantity, ...(l.barcode ? { barcode: l.barcode, fallbackQuery: l.name } : {}), pin: { [store.id]: l.code }, sourceLine: { name: l.name, code: l.code } }));
+  return { info, items };
+}
+
+const round3 = (n) => Math.round(n * 1000) / 1000;
+
 export async function compareBasket(stores, args = {}, { timeoutMs = 45_000, cache = searchCache, preferences = null } = {}) {
-  const items = resolveItems(args, preferences);
   const selected = selectStores(stores, args.stores);
+  const fromOrder = args.source ? await sourceItems(stores, args.source) : null;
+  const items = [...(args.items?.length || args.usual ? resolveItems(args, preferences) : []), ...(fromOrder?.items ?? [])];
+  if (!items.length) throw new StoreError('items must be a non-empty list, or set usual: true or a source order', 'INVALID_ARGUMENT');
 
   // One search per distinct query and store; the cache also merges repeats.
   const queries = [...new Set(items.map((it) => it.query))];
@@ -258,13 +334,54 @@ export async function compareBasket(stores, args = {}, { timeoutMs = 45_000, cac
     delete status[store.id].count;
   }
 
+  // A barcode a store does not stock falls back to searching that store by name.
+  const fallbacks = [];
+  for (const it of items) {
+    for (const s of selected) {
+      const list = searches.get(`${s.id}|${it.query}`)?.hit?.value ?? [];
+      const pinned = it.pin?.[s.id];
+      const found = it.barcode ? list.some((x) => x.barcode === it.barcode) : true;
+      if (it.fallbackQuery && (!found || (pinned && !list.some((x) => x.productId === pinned)))) fallbacks.push([s, it.fallbackQuery]);
+    }
+  }
+  await Promise.all(
+    [...new Map(fallbacks.map(([s, q]) => [`${s.id}|${q}`, [s, q]])).values()].map(async ([s, q]) => {
+      try {
+        searches.set(`${s.id}|${q}`, { hit: await searchStore(s, q, { timeoutMs, cache }) });
+      } catch (error) {
+        searches.set(`${s.id}|${q}`, { error: error.message });
+      }
+    }),
+  );
+
   const lines = items.map((it) => {
     const lists = Object.fromEntries(selected.map((s) => [s.id, searches.get(`${s.id}|${it.query}`)?.hit?.value ?? []]));
     const constraints = it.barcode ? {} : constraintsOf(it.query);
-    const { matches, identical } = pickMatches(lists, { barcode: it.barcode, constraints });
-    const offers = Object.fromEntries(selected.map((s) => [s.id, offer(matches[s.id], it.quantity)]));
+    let { matches, identical } = pickMatches(lists, { barcode: it.barcode, constraints });
+    const byName = new Set();
+    for (const s of selected) {
+      const pinned = it.pin?.[s.id];
+      const named = it.fallbackQuery ? searches.get(`${s.id}|${it.fallbackQuery}`)?.hit?.value ?? [] : [];
+      const own = pinned ? [...lists[s.id], ...named].find((x) => x.productId === pinned && x.price != null) : null;
+      if (own && matches[s.id]?.productId !== pinned) {
+        matches = { ...matches, [s.id]: own };
+        identical = false;
+      } else if (!matches[s.id] && named.length) {
+        const pick = pickMatches({ [s.id]: named }).matches[s.id];
+        if (pick) {
+          matches = { ...matches, [s.id]: pick };
+          byName.add(s.id);
+          identical = false;
+        }
+      }
+    }
+    const offers = Object.fromEntries(selected.map((s) => {
+      const o = offer(matches[s.id], it.quantity);
+      return [s.id, o && byName.has(s.id) ? { ...o, matchedBy: 'name' } : o];
+    }));
     return {
       query: it.query,
+      ...(it.sourceLine ? { sourceLine: it.sourceLine } : {}),
       ...(Object.keys(constraints).length ? { constraints: { ...constraints, ...(constraints.size ? { size: constraints.size.label } : {}) } } : {}),
       ...(it.preference ? { preference: it.preference } : {}),
       quantity: it.quantity,
@@ -310,7 +427,11 @@ export async function compareBasket(stores, args = {}, { timeoutMs = 45_000, cac
   if (lines.some((l) => l.constraints && Object.values(l.offers).some((o) => !o))) notes.push('A store with no product matching the size, count or grade in the query lists the item as missing rather than offering a different one.');
   for (const [id, st] of Object.entries(status)) if (st.stale) notes.push(`${id} did not answer; its prices are cached from ${st.fetchedAt}.`);
 
+  if (fromOrder) notes.push(`Prices are today's, not what order ${fromOrder.info.order} cost; its paid total includes delivery and any weighing differences.`);
+  if (lines.some((l) => Object.values(l.offers).some((o) => o?.matchedBy === 'name'))) notes.push('Offers with matchedBy: name were found by product name, not barcode; check they are the same product.');
+
   return {
+    ...(fromOrder ? { source: fromOrder.info } : {}),
     stores: status,
     items: lines,
     totals,

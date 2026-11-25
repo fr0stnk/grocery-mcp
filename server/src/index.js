@@ -4,6 +4,8 @@ import { AccountMonitor } from './accounts.js';
 import { createGroceryServer } from './app.js';
 import { createStores } from './config.js';
 import { PreferenceStore } from './preferences.js';
+import { PriceHistory, startTracker } from './history.js';
+import { recordSearchesWith, searchStore } from './search.js';
 import { parseListen, startHttpServer } from './http.js';
 import { withTimeout } from './stores.js';
 import { BUILD, FULL_VERSION } from './version.js';
@@ -16,6 +18,8 @@ const httpListen = process.env.GROCERY_HTTP ? parseListen(process.env.GROCERY_HT
 const stores = createStores();
 const preferences = new PreferenceStore();
 const monitor = new AccountMonitor();
+const history = /^(0|false|no|off)$/i.test(process.env.GROCERY_PRICE_HISTORY ?? '') ? null : new PriceHistory();
+if (history) recordSearchesWith((items) => history.record(items));
 
 // Start the adapters before serving, so their tools and instructions are
 // known. A store that fails here is retried on its next use.
@@ -36,9 +40,11 @@ process.on('SIGINT', () => void shutdown(130));
 process.on('SIGTERM', () => void shutdown(143));
 
 if (httpListen) {
-  await startHttpServer({ ...httpListen, makeServer: () => createGroceryServer(stores, { readOnly, log, preferences, monitor }), log });
+  await startHttpServer({ ...httpListen, makeServer: () => createGroceryServer(stores, { readOnly, log, preferences, monitor, history }), log });
+  // Only the long-running server tracks prices; one-shot stdio runs just record what they search.
+  if (history) startTracker({ preferences, stores, search: (store, q) => searchStore(store, q), log });
 } else {
-  const server = createGroceryServer(stores, { readOnly, log, preferences, monitor });
+  const server = createGroceryServer(stores, { readOnly, log, preferences, monitor, history });
   server.onclose = () => void shutdown(0);
   // The SDK's stdio transport does not close on end of input, and the child
   // adapters' pipes would keep this process alive after the client leaves.

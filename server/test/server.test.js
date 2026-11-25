@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -8,6 +10,9 @@ import { SearchCache } from '../src/cache.js';
 import { searchAllStores } from '../src/search.js';
 import { StoreClient } from '../src/stores.js';
 import { normalizeRamiLevy } from '../src/normalize.js';
+
+// Spawned servers must not write price history into the repository.
+process.env.GROCERY_HISTORY_FILE ??= path.join(mkdtempSync(path.join(tmpdir(), 'grocery-history-')), 'history.db');
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const FAKE = path.join(here, 'fixtures/fake-store.js');
