@@ -159,7 +159,7 @@ test('compareBasket does not multiply kilograms by a unit or package price (revi
   const [tomatoes, bananas] = out.items;
   assert.deepEqual([tomatoes.offers.shufersal.excluded, tomatoes.offers['rami-levy'].excluded, tomatoes.cheapestStore], ['INCOMPATIBLE_QUANTITY_BASIS', 'INCOMPATIBLE_QUANTITY_BASIS', null]);
   assert.deepEqual([bananas.offers.shufersal.lineTotal, bananas.offers['rami-levy'].lineTotal], [11.85, 10.35]);
-  assert.deepEqual(out.totals.shufersal, { total: 11.85, itemsFound: 1, missing: [], notComparable: ['עגבניות'], addInApp: ['בננה'] });
+  assert.deepEqual(out.totals.shufersal, { total: 11.85, itemsFound: 1, missing: [], notComparable: ['עגבניות'] });
   assert.deepEqual([out.comparable.items, out.split.total], [1, 10.35]);
 });
 
@@ -233,6 +233,5 @@ test('comparable leaves out different sizes and counts; kg quantities prefer per
   assert.deepEqual([bananas.offers.shufersal.productId, bananas.offers['rami-levy'].productId, bananas.identical], ['B', 'B', false], 'fresh bananas per kg, not the shared-barcode drink');
   assert.deepEqual(out.comparable, { items: 2, identicalItems: 1, leftOut: [{ query: 'ביצים', reason: '18 vs 12 units' }], shufersal: 25.2, 'rami-levy': 20.55, cheaperStore: 'rami-levy', difference: 4.65 });
   assert.deepEqual([out.totals.shufersal.total, out.totals['rami-levy'].total], [47.01, 35.05], 'store totals still include every item');
-  assert.deepEqual([bananas.offers.shufersal.addable, bananas.offers['rami-levy'].addable, out.totals.shufersal.addInApp, out.totals['rami-levy'].addInApp], [false, undefined, ['בננות'], undefined], 'Shufersal weighed items are flagged before ordering');
 });
 

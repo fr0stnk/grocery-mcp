@@ -412,8 +412,6 @@ export async function compareBasket(stores, args = {}, { timeoutMs = 45_000, cac
       const m = matches[s.id];
       let o = offer(m, it.packs && m && (m.priceBasis ?? 'unit') !== 'kg' ? it.packs : it.quantity);
       if (o && byName.has(s.id)) o = { ...o, matchedBy: 'name' };
-      // Shufersal's cart tools add only products sold by unit; weighed and packaged ones are added in its app.
-      if (o && !o.excluded && s.id === 'shufersal' && (o.soldByWeight || (o.priceBasis ?? 'unit') !== 'unit')) o = { ...o, addable: false };
       return [s.id, o];
     }));
     // Identity is claimed only for offers that can actually be priced.
@@ -439,13 +437,11 @@ export async function compareBasket(stores, args = {}, { timeoutMs = 45_000, cac
   for (const s of selected) {
     const found = lines.filter((l) => isPriced(l.offers[s.id]));
     const excluded = lines.filter((l) => l.offers[s.id]?.excluded).map((l) => l.query);
-    const manual = lines.filter((l) => l.offers[s.id]?.addable === false).map((l) => l.query);
     totals[s.id] = {
       total: round(found.reduce((sum, l) => sum + l.offers[s.id].lineTotal, 0)),
       itemsFound: found.length,
       missing: lines.filter((l) => !l.offers[s.id]).map((l) => l.query),
       ...(excluded.length ? { notComparable: excluded } : {}),
-      ...(manual.length ? { addInApp: manual } : {}),
     };
   }
 
@@ -477,7 +473,6 @@ export async function compareBasket(stores, args = {}, { timeoutMs = 45_000, cac
   if (lines.some((l) => l.constraints && Object.values(l.offers).some((o) => !o))) notes.push('A store with no product matching the size, count or grade in the query lists the item as missing rather than offering a different one.');
   for (const [id, st] of Object.entries(status)) if (st.stale) notes.push(`${id} did not answer; its prices are cached from ${st.fetchedAt}.`);
 
-  if (lines.some((l) => Object.values(l.offers).some((o) => o?.addable === false))) notes.push('Offers with addable: false (Shufersal products sold by weight or package) are priced here but cannot be added by add_basket_to_cart; the user adds them in the Shufersal app. Each store lists them in addInApp.');
   if (fromOrder) notes.push(`Prices are today's, not what order ${fromOrder.info.order} cost; its paid total includes delivery and any weighing differences.`);
   if (lines.some((l) => Object.values(l.offers).some((o) => o?.matchedBy === 'name'))) notes.push('Offers with matchedBy: name were found by product name, not barcode; check they are the same product.');
 

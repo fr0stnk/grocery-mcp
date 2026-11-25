@@ -95,7 +95,7 @@ Each offer's `lineTotal` is price × quantity. A fractional quantity means kilog
 The result contains:
 
 - `items`: each item's chosen offers per store, with `cheapestStore`.
-- `totals`: each store's total, the number of items found and the `missing` queries. Shufersal offers for products sold by weight or package carry `addable: false` and are listed in `addInApp`: they are priced, but `add_basket_to_cart` cannot add them, so the user adds them in the Shufersal app. Choosing a store should take that into account.
+- `totals`: each store's total, the number of items found and the `missing` queries.
 - `comparable`: totals over only the items every store has **like for like**, with `cheaperStore` and `difference`. This is the fair comparison. An item whose products differ in pack size (`0.5 kg vs 1 kg`), count (`18 vs 12 units`) or how they are sold (`kg vs unit`) is marked `notEquivalent` and listed in `comparable.leftOut` with the reason. It still counts in each store's own total. Sizes that cannot be read on both sides are not treated as different.
 - `split`: the total when every item is bought where it is cheapest, and `savingsOnCommonItems` against the cheapest single store.
 - `notes`: delivery fees and minimum orders are excluded, weighed quantities are in kilograms, and some prices may be stale.
@@ -136,9 +136,9 @@ This tool adds several products to **one** store's real cart in a single call, u
 - **The server checks every product before anything is added, and a dry run uses exactly the same checks.** Each product is looked up in fresh search results (up to 15 minutes old), or else with a live search by its code. Rejected items get a stable code:
   - `PRODUCT_NOT_FOUND` for an unknown product,
   - `OUT_OF_STOCK`, including Rami Levy items not sold at the branch,
-  - `UNSUPPORTED_SELLING_METHOD` for Shufersal items sold by weight or package, which are added in Shufersal's app,
+  - `ALREADY_IN_CART` for a Shufersal weighed or packaged product already in the cart, whose amount is changed in Shufersal's app,
   - `UNSUPPORTED_PRODUCT_ID` for anything that is not a Shufersal code; variant codes such as `P_7296073409441_42` are accepted,
-  - `INVALID_QUANTITY` for a fractional quantity of an item sold by unit,
+  - `INVALID_QUANTITY` for a fractional quantity of an item sold by unit or pack, or a Shufersal weight that is not in 0.5 kg steps. Products sold by weight take their quantity in kilograms in both stores,
   - `PRODUCT_NOT_VERIFIED` for a Rami Levy product that cannot be found again. A product outside the 15-minute search cache is re-checked live: by the barcode it had when this server last saw it (from the price history, up to two days back), otherwise by that name or the given `name`. Rami Levy's catalog cannot be searched by product id, and a caller's name and price are never trusted on their own.
 - Every result line has a `status` (`added`, `would-add` or `rejected`). The summary counts `requested`, `accepted`, `rejected` and `added`, and `complete` is true only when every line went through.
 - **Shufersal:** only the checked items go to the adapter's bulk `add_to_cart`, in one call. The adapter's per-line outcome is reported back. The adapter leaves a product that is already in the cart unchanged, so the server then raises it with `set_quantity` to the existing quantity plus the requested one, and confirms the new quantity in the returned cart (`cartQuantity`). A total above Shufersal's 30-unit limit is rejected as `INVALID_QUANTITY` and nothing is changed.

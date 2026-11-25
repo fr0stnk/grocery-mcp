@@ -99,7 +99,7 @@ function round(n, digits = 2) {
  * priceBasis says what `price` buys: one item ("unit"), one kilogram ("kg"), or
  * one package whose final charge depends on its weight ("package", estimated).
  */
-function item(store, { productId, barcode = null, barcodeInferred = false, name, brand = null, sizeText, price, regularPrice = null, inStock = null, byWeight = false, pricedPerKg = false, priceBasis, promotions = [] }) {
+function item(store, { productId, barcode = null, barcodeInferred = false, name, brand = null, sizeText, price, regularPrice = null, sellingMethod = null, inStock = null, byWeight = false, pricedPerKg = false, priceBasis, promotions = [] }) {
   const p = parsePrice(price);
   // A weighed item's price is per kilogram when the store says so; otherwise
   // it is not tied to the pack size, so no unit price is derived.
@@ -130,6 +130,7 @@ function item(store, { productId, barcode = null, barcodeInferred = false, name,
     inStock,
     ...(promotions.length ? { promotions } : {}),
     ...(byWeight ? { soldByWeight: true } : {}),
+    ...(sellingMethod && sellingMethod !== 'BY_UNIT' ? { sellingMethod } : {}),
   };
 }
 
@@ -252,6 +253,7 @@ export function normalizeShufersalRaw(results) {
         sizeText: p.unitDescription,
         price,
         regularPrice: perKg ? official.pricePerUnit : null,
+        sellingMethod: method ?? null,
         inStock: stock ? stock !== 'outOfStock' : null,
         byWeight: Boolean(method) && method !== 'BY_UNIT',
         pricedPerKg: perKg,

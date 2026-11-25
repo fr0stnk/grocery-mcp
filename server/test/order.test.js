@@ -43,9 +43,9 @@ test('Shufersal checks every product the same way in a dry run, before anything 
 
   assert.deepEqual(store.calls, [], 'a dry run sends nothing to the adapter');
   assert.deepEqual(out.results.map((r) => r.status === 'rejected' ? r.code : r.status), [
-    'would-add', 'PRODUCT_NOT_FOUND', 'UNSUPPORTED_SELLING_METHOD', 'OUT_OF_STOCK', 'would-add', 'UNSUPPORTED_PRODUCT_ID', 'INVALID_QUANTITY',
+    'would-add', 'PRODUCT_NOT_FOUND', 'would-add', 'OUT_OF_STOCK', 'would-add', 'UNSUPPORTED_PRODUCT_ID', 'INVALID_QUANTITY',
   ]);
-  assert.deepEqual([out.requested, out.accepted, out.rejected, out.complete], [7, 2, 5, false]);
+  assert.deepEqual([out.requested, out.accepted, out.rejected, out.complete], [7, 3, 4, false]);
   assert.equal(out.results[4].name, 'variant', 'a variant code matches its exact variant');
   assert.deepEqual([out.results[0].productId, out.results[0].priceSource], ['P_7290102398065', 'server']);
 });
@@ -155,5 +155,19 @@ test('a Rami Levy id seen in the last two days is re-checked by its barcode, wit
   const history = { lastSeen: async (id, productId) => (productId === '354095' ? { name: 'חלב', barcode: '7290110563462', price: 9.3 } : null) };
   const out = await addBasketToCart([store], { store: 'rami-levy', dry_run: true, items: [{ productId: '354095', quantity: 2 }, { productId: '1' }] }, { cache: new SearchCache(), history });
   assert.deepEqual(out.results.map((r) => [r.status, r.code, r.priceSource, r.price]), [['would-add', undefined, 'server', 9.3], ['rejected', 'PRODUCT_NOT_VERIFIED', undefined, undefined]]);
+});
+
+test('Shufersal weighed products are sent as weight_kg in 0.5 kg steps, packs as whole numbers', async () => {
+  const cache = new SearchCache();
+  await seed(cache, 'shufersal', 'פירות', [
+    product('shufersal', 'P_964775', { name: 'בננה', priceBasis: 'kg', soldByWeight: true, sellingMethod: 'BY_WEIGHT' }),
+    product('shufersal', 'P_7296073440314', { name: 'עגבניה ארוזה', priceBasis: 'package', soldByWeight: true, sellingMethod: 'BY_PACKAGE' }),
+  ]);
+  const store = fakeStore('shufersal', { respond: (tool, args) => text({ lines: args.items.map((i) => ({ code: i.code, status: 'added' })) }) });
+  const out = await addBasketToCart([store], { store: 'shufersal', items: [
+    { productId: 'P_964775', quantity: 1.5 }, { productId: 'P_7296073440314', quantity: 2 }, { productId: 'P_964775', quantity: 1.2 }, { productId: 'P_7296073440314', quantity: 0.5 },
+  ] }, { cache });
+  assert.deepEqual(store.calls[0][1].items, [{ code: 'P_964775', weight_kg: 1.5 }, { code: 'P_7296073440314', quantity: 2 }]);
+  assert.deepEqual(out.results.map((r) => r.status === 'rejected' ? r.code : r.status), ['added', 'added', 'INVALID_QUANTITY', 'INVALID_QUANTITY']);
 });
 

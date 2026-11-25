@@ -10,7 +10,8 @@ export const ADD_BASKET_TOOL = {
   description:
     'Add several products to one store\'s real cart in a single step, usually the chosen store\'s offers from compare_basket. ' +
     'Pass each offer\'s productId and quantity. The server checks every product before anything is added, with the same checks in a dry run: ' +
-    'unknown products, out-of-stock items and (for Shufersal) items sold by weight or package are rejected with a code, ' +
+    'unknown products and out-of-stock items are rejected with a code; for products sold by weight (both stores) quantity is kilograms ' +
+    '(Shufersal in 0.5 kg steps), and packs and units take whole numbers; ' +
     'and Rami Levy names and prices come from the server\'s own search results rather than the request ' +
     '(a Rami Levy product outside recent results is looked up by its name, and refused as PRODUCT_NOT_VERIFIED if not found). ' +
     'Each item gets a status (added, would-add or rejected); complete is false when anything was rejected. Quantities are added to what is ' +
@@ -28,7 +29,7 @@ export const ADD_BASKET_TOOL = {
           type: 'object',
           properties: {
             productId: { type: 'string', minLength: 1, maxLength: 64, description: 'The offer\'s productId (P_… for Shufersal)' },
-            quantity: { type: 'number', exclusiveMinimum: 0, maximum: 100, default: 1, description: 'Units, or kilograms for Rami Levy items priced per kg' },
+            quantity: { type: 'number', exclusiveMinimum: 0, maximum: 100, default: 1, description: 'Units or packs, or kilograms for products sold by weight' },
             name: { type: 'string', description: 'Rami Levy only: the product name, used to look the product up when it is not in recent search results' },
             price: { type: 'number', minimum: 0, description: 'Rami Levy only: the price the user saw; a different current price is reported as priceChanged' },
           },
@@ -85,13 +86,18 @@ async function lookup(store, productId, cache) {
 
 async function checkShufersal(store, it, cache) {
   if (!/^P_\d+(?:_\d+)?$/i.test(it.productId)) return reject(it, 'UNSUPPORTED_PRODUCT_ID', `${it.productId} is not a Shufersal code like P_4131074 or P_7296073409441_42`);
-  if (!Number.isInteger(it.quantity)) return reject(it, 'INVALID_QUANTITY', 'Shufersal needs whole units here');
   const product = await lookup(store, it.productId, cache);
   if (product === undefined) return reject(it, 'STORE_UNAVAILABLE', 'Shufersal could not be searched to check this product');
   if (!product) return reject(it, 'PRODUCT_NOT_FOUND', `${it.productId} was not found in Shufersal's catalog`);
   if (product.inStock === false) return reject(it, 'OUT_OF_STOCK', `${product.name} is out of stock`);
-  if (product.priceBasis && product.priceBasis !== 'unit') return reject(it, 'UNSUPPORTED_SELLING_METHOD', `${product.name} is sold by ${product.priceBasis === 'kg' ? 'weight' : 'package'}; add it in the Shufersal app`);
-  return { ...it, productId: product.productId, name: product.name, price: product.price, priceBasis: 'unit', priceSource: 'server' };
+  // Weighed products are added by weight in kg (0.5 kg steps), packs and units in whole numbers.
+  const method = product.sellingMethod ?? (product.priceBasis === 'kg' ? 'BY_WEIGHT' : product.priceBasis === 'package' ? 'BY_PACKAGE' : 'BY_UNIT');
+  if (method === 'BY_WEIGHT') {
+    if (!(it.quantity >= 0.5 && Number.isInteger(it.quantity * 2))) return reject(it, 'INVALID_QUANTITY', `${product.name} is sold by weight in steps of 0.5 kg; give the weight in kg, e.g. 1.5`);
+  } else if (!Number.isInteger(it.quantity)) {
+    return reject(it, 'INVALID_QUANTITY', `${product.name} is sold by ${method === 'BY_PACKAGE' ? 'pack' : 'unit'}; use a whole number`);
+  }
+  return { ...it, productId: product.productId, name: product.name, price: product.price, priceBasis: product.priceBasis ?? 'unit', sellingMethod: method, priceSource: 'server' };
 }
 
 /**
@@ -179,7 +185,10 @@ export async function addBasketToCart(stores, args = {}, { cache = searchCache, 
 
   if (store.id === 'shufersal') {
     // The adapter adds the whole checked list in one request.
-    const result = await store.callTool('add_to_cart', { items: valid.map((c) => ({ code: c.productId.toUpperCase(), quantity: c.quantity })), dry_run: false });
+    const result = await store.callTool('add_to_cart', {
+      items: valid.map((c) => (c.sellingMethod === 'BY_WEIGHT' ? { code: c.productId.toUpperCase(), weight_kg: c.quantity } : { code: c.productId.toUpperCase(), quantity: c.quantity })),
+      dry_run: false,
+    });
     const body = parseText(result);
     if (result.isError) throw new StoreError(`Shufersal: ${String(typeof body === 'string' ? body : JSON.stringify(body)).slice(0, 500)}`, 'STORE_ERROR');
     const lines = Array.isArray(body?.lines) ? body.lines : [];
@@ -190,8 +199,9 @@ export async function addBasketToCart(stores, args = {}, { cache = searchCache, 
         continue;
       }
       const line = lines.find((l) => String(l.code ?? l.input ?? '').toUpperCase() === c.productId.toUpperCase());
-      // The adapter leaves a product already in the cart untouched; this tool adds to it.
-      if (line?.status === 'already-in-cart') out.push(await topUpShufersal(store, c, Number(line.cartQuantity), describe));
+      // The adapter leaves a product already in the cart untouched; this tool adds to it (units only: Shufersal changes weights in its app).
+      if (line?.status === 'already-in-cart' && c.sellingMethod !== 'BY_UNIT') out.push({ ...describe(c, 'rejected'), code: 'ALREADY_IN_CART', message: `${c.name} is already in the cart; change its ${c.sellingMethod === 'BY_WEIGHT' ? 'weight' : 'packs'} in the Shufersal app`, cartQuantity: line.cartQuantity });
+      else if (line?.status === 'already-in-cart') out.push(await topUpShufersal(store, c, Number(line.cartQuantity), describe));
       else if (!line || /^(added|would-add)$/.test(line.status ?? 'added')) out.push({ ...describe(c, 'added'), ...(line?.cartQuantity != null ? { cartQuantity: line.cartQuantity } : {}) });
       else out.push({ ...describe(c, 'rejected'), code: 'STORE_REJECTED', message: line.status });
     }
