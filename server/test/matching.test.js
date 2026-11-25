@@ -176,3 +176,9 @@ test('GROC-015: packaging words are not product words, and a store is retried wi
   const [onion, apples, grapes] = out.items.map((l) => l.offers['rami-levy']?.productId ?? null);
   assert.deepEqual([onion, apples, grapes], ['78', '18', null], 'red onion, Smith apples, and no lettuce or pitas for grapes');
 });
+
+test('GROC-016: compare_basket says to translate a query with no Hebrew letters', async () => {
+  const out = await compare([{ query: 'lactose free milk', quantity: 1 }, { query: 'חלב 3% 1 ליטר', quantity: 1 }]);
+  assert.ok(out.notes.some((n) => /no Hebrew letters: lactose free milk\. Translate/.test(n)));
+  assert.ok(!(await compare([{ query: 'חלב 3% 1 ליטר', quantity: 1 }])).notes.some((n) => /Translate/.test(n)));
+});

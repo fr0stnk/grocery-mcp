@@ -562,6 +562,8 @@ export async function compareBasket(stores, args = {}, { timeoutMs = 45_000, cac
   if (lines.some((l) => Object.values(l.offers).some((o) => o?.unrequested))) notes.push('Offers with unrequested are the closest product a store has, but carry a variant or pack the query did not ask for (Diet, flavoured, frozen, a six-pack); confirm them with the user.');
   if (lines.some((l) => Object.values(l.offers).some((o) => o?.fit === 'unverified'))) notes.push('Offers with fit: unverified could not be checked against the size, count or grade in the query; confirm them.');
   if (lines.some((l) => l.constraints && Object.values(l.offers).some((o) => !o))) notes.push('A store with no product matching the size, count or grade in the query lists the item as missing rather than offering a different one.');
+  const untranslated = lines.filter((l) => !l.barcode && !/[\u0590-\u05FF]/u.test(l.query) && !/^\d+$/.test(l.query)).map((l) => l.query);
+  if (untranslated.length) notes.push(`The store catalogs are in Hebrew and these items have no Hebrew letters: ${untranslated.join(', ')}. Translate them to Hebrew (for example milk → חלב) and compare again.`);
   for (const [id, st] of Object.entries(status)) if (st.stale) notes.push(`${id} did not answer; its prices are cached from ${st.fetchedAt}.`);
 
   if (fromOrder) notes.push(`Prices are today's, not what order ${fromOrder.info.order} cost; its paid total includes delivery and any weighing differences.`);

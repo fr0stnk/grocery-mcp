@@ -109,7 +109,7 @@ The result contains:
 - Shufersal packaged produce (BY_PACKAGE with a weight range, such as tomatoes at 900–1100 g) is priced per kilogram, so it compares with Rami Levy's per-kg produce. The offer carries `packWeightKg` (the midpoint), `packPrice` and `packs`: the quantity in kg divided by the pack weight, rounded half up, at least one. `lineTotal` is packs × packPrice. Pass `packs` as the quantity to `add_basket_to_cart`.
 - A multipack is read as its total plus `packCount` and `itemSize`, whether written `6*1.5 ליטר` or `שישייה 1.5 ליטר`. A query for 1.5 L accepts it only when no single item fits, marked `unrequested` (`6×1.5 L`) on the offer and the item. The same six-pack in both stores is still `identical` and compared.
 - `split`: the total when every item is bought where it is cheapest, and `savingsOnCommonItems` against the cheapest single store. Items marked `notEquivalent` are left out and listed in `split.leftOut`.
-- `notes`: delivery fees and minimum orders are excluded, weighed quantities are in kilograms, and some prices may be stale.
+- `notes`: delivery fees and minimum orders are excluded, items with no Hebrew letters should be translated and compared again, weighed quantities are in kilograms, and some prices may be stale.
 
 A store that fails is reported in `stores`, and the other store is still priced.
 
