@@ -149,3 +149,11 @@ test('addBasketToCart rejects bad requests with stable codes', async () => {
     await assert.rejects(addBasketToCart([shufersal], args, { cache: new SearchCache() }), (e) => e.code === code && message.test(e.message));
   }
 });
+
+test('a Rami Levy id seen in the last two days is re-checked by its barcode, with no name needed (review GROC-051-03)', async () => {
+  const store = fakeStore('rami-levy', { catalog: { 7290110563462: [product('rami-levy', '354095', { name: 'חלב נטול לקטוז', price: 9.3, barcode: '7290110563462' })] } });
+  const history = { lastSeen: async (id, productId) => (productId === '354095' ? { name: 'חלב', barcode: '7290110563462', price: 9.3 } : null) };
+  const out = await addBasketToCart([store], { store: 'rami-levy', dry_run: true, items: [{ productId: '354095', quantity: 2 }, { productId: '1' }] }, { cache: new SearchCache(), history });
+  assert.deepEqual(out.results.map((r) => [r.status, r.code, r.priceSource, r.price]), [['would-add', undefined, 'server', 9.3], ['rejected', 'PRODUCT_NOT_VERIFIED', undefined, undefined]]);
+});
+

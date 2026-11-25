@@ -189,6 +189,7 @@ function offer(match, quantity) {
     ...(match.priceEstimated ? { priceEstimated: true } : {}),
     ...(match.barcodeInferred ? { barcodeInferred: true } : {}),
     ...(match.size ? { size: match.size } : {}),
+    ...(match.count ? { count: match.count } : {}),
     ...(match.fit ? { fit: match.fit } : {}),
     ...lineCost(match, quantity),
     ...(clubOffer ? { clubOffer } : {}),
@@ -197,6 +198,24 @@ function offer(match, quantity) {
 }
 
 const isPriced = (o) => Boolean(o && !o.excluded);
+
+/**
+ * Whether different products are still like for like: 'match', or why not
+ * ("0.5 kg vs 1 kg", "12 vs 18 units", "kg vs unit"). Only sizes that are
+ * known on both sides can differ; unknown sizes count as a match.
+ */
+function equivalenceOf(offers) {
+  if (offers.length < 2) return 'match';
+  const [a, b] = offers;
+  const kg = (o) => (o.priceBasis ?? 'unit') === 'kg';
+  if (kg(a) !== kg(b)) return `${a.priceBasis ?? 'unit'} vs ${b.priceBasis ?? 'unit'}`;
+  if (kg(a)) return 'match';
+  if (a.count && b.count && a.count !== b.count) return `${a.count} vs ${b.count} units`;
+  const sa = sizeOf(a);
+  const sb = sizeOf(b);
+  if (sa && sb && (sa.unit !== sb.unit || !close(sa.amount, sb.amount))) return `${sa.label} vs ${sb.label}`;
+  return 'match';
+}
 
 function cheapest(offers) {
   const priced = Object.entries(offers).filter(([, o]) => isPriced(o));
@@ -367,7 +386,9 @@ export async function compareBasket(stores, args = {}, { timeoutMs = 45_000, cac
   );
 
   const lines = items.map((it) => {
-    const lists = Object.fromEntries(selected.map((s) => [s.id, searches.get(`${s.id}|${it.query}`)?.hit?.value ?? []]));
+    // A fractional quantity is kilograms: where a store sells something per kg, choose among those.
+    const kgFirst = (list) => (!Number.isInteger(it.quantity) && list.some((x) => x.priceBasis === 'kg') ? list.filter((x) => x.priceBasis === 'kg') : list);
+    const lists = Object.fromEntries(selected.map((s) => [s.id, kgFirst(searches.get(`${s.id}|${it.query}`)?.hit?.value ?? [])]));
     const constraints = it.barcode ? {} : constraintsOf(it.query);
     let { matches, identical } = pickMatches(lists, { barcode: it.barcode, constraints });
     const byName = new Set();
@@ -392,9 +413,13 @@ export async function compareBasket(stores, args = {}, { timeoutMs = 45_000, cac
       const o = offer(m, it.packs && m && (m.priceBasis ?? 'unit') !== 'kg' ? it.packs : it.quantity);
       return [s.id, o && byName.has(s.id) ? { ...o, matchedBy: 'name' } : o];
     }));
+    // Identity is claimed only for offers that can actually be priced.
+    if (identical && !Object.values(offers).every(isPriced)) identical = false;
+    const equivalence = identical ? null : equivalenceOf(Object.values(offers).filter(isPriced));
     return {
       query: it.query,
       ...(it.sourceLine ? { sourceLine: it.sourceLine } : {}),
+      ...(equivalence && equivalence !== 'match' ? { notEquivalent: equivalence } : {}),
       ...(Object.keys(constraints).length ? { constraints: { ...constraints, ...(constraints.size ? { size: constraints.size.label } : {}) } } : {}),
       ...(it.preference ? { preference: it.preference } : {}),
       quantity: it.quantity,
@@ -419,8 +444,13 @@ export async function compareBasket(stores, args = {}, { timeoutMs = 45_000, cac
     };
   }
 
-  const common = lines.filter((l) => selected.every((s) => isPriced(l.offers[s.id])));
-  const comparable = { items: common.length, identicalItems: common.filter((l) => l.identical).length };
+  const priceable = lines.filter((l) => selected.every((s) => isPriced(l.offers[s.id])));
+  const common = priceable.filter((l) => !l.notEquivalent);
+  const comparable = {
+    items: common.length,
+    identicalItems: common.filter((l) => l.identical).length,
+    ...(priceable.length > common.length ? { leftOut: priceable.filter((l) => l.notEquivalent).map((l) => ({ query: l.query, reason: l.notEquivalent })) } : {}),
+  };
   for (const s of selected) comparable[s.id] = round(common.reduce((sum, l) => sum + l.offers[s.id].lineTotal, 0));
   if (selected.length > 1 && common.length) {
     const ranked = selected.map((s) => [s.id, comparable[s.id]]).sort((a, b) => a[1] - b[1]);
@@ -436,6 +466,7 @@ export async function compareBasket(stores, args = {}, { timeoutMs = 45_000, cac
   const notes = ['Delivery fees, minimum order amounts and club prices are not included.'];
   if (lines.some((l) => Object.values(l.offers).some((o) => o?.soldByWeight))) notes.push('For weighed items the quantity is kilograms and the price is per kilogram where the store says so.');
   if (lines.some((l) => !l.identical && Object.values(l.offers).filter(isPriced).length > 1)) notes.push('Items with identical: false compare different products; check that they are acceptable substitutes.');
+  if (lines.some((l) => l.notEquivalent)) notes.push('Items whose products differ in size, count or how they are sold (notEquivalent) are in each store\'s total but left out of comparable, which is like for like only.');
   if (lines.some((l) => Object.values(l.offers).some((o) => o?.excluded))) notes.push('A fractional quantity is kilograms; products sold by unit or package cannot be priced for it and are listed in notComparable. Ask for whole units, or choose a product sold by weight.');
   if (lines.some((l) => Object.values(l.offers).some((o) => o?.fit === 'unverified'))) notes.push('Offers with fit: unverified could not be checked against the size, count or grade in the query; confirm them.');
   if (lines.some((l) => l.constraints && Object.values(l.offers).some((o) => !o))) notes.push('A store with no product matching the size, count or grade in the query lists the item as missing rather than offering a different one.');

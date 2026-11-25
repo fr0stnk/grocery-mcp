@@ -98,7 +98,7 @@ function ownTools(stores, preferences, monitor, { readOnly, history }) {
     [ACCOUNT_TOOL, () => monitor.status(stores)],
     [SEARCH_TOOL, (args) => searchAllStores(stores, args)],
     [BASKET_TOOL, (args) => compareBasket(stores, args, { preferences })],
-    [ADD_BASKET_TOOL, (args) => addBasketToCart(stores, args)],
+    [ADD_BASKET_TOOL, (args) => addBasketToCart(stores, args, { history })],
     ...PREFERENCE_TOOLS.map((tool) => [tool, (args) => runPreferenceTool(preferences, tool.name, args)]),
     ...(history ? [[PRICE_HISTORY_TOOL, (args) => priceHistory(history, args, { preferences, findIds: (q) => topIds(stores, q) })]] : []),
   ];

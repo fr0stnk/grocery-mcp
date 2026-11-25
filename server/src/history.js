@@ -82,6 +82,13 @@ export class PriceHistory {
     return db.prepare('SELECT * FROM prices WHERE store = ? AND product_id = ? AND day >= ? ORDER BY day').all(store, productId, since);
   }
 
+  /** The latest record of a product seen within `days`, or null. */
+  async lastSeen(store, productId, days = 2) {
+    const db = await this.#open();
+    const row = db.prepare('SELECT * FROM prices WHERE store = ? AND product_id = ? AND day >= ? ORDER BY day DESC LIMIT 1').get(store, String(productId), dayOf(this.now() - days * DAY_MS));
+    return row ? { name: row.name, barcode: row.barcode, price: row.price } : null;
+  }
+
   close() {
     this.#db?.close();
     this.#db = null;

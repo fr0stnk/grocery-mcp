@@ -26,7 +26,7 @@ export const SEARCH_TOOL = {
     properties: {
       query: { type: 'string', minLength: 1, description: 'Hebrew search terms, e.g. "חלב 3%". Translate Russian or English requests; use Hebrew as written.' },
       limit: { type: 'integer', minimum: 1, maximum: 20, default: 10, description: 'Maximum results per store' },
-      sortBy: { type: 'string', enum: ['relevance', 'unitPrice', 'price'], default: 'relevance', description: 'relevance keeps each store\'s ranking; unitPrice sorts by price per liter or kilogram' },
+      sortBy: { type: 'string', enum: ['relevance', 'unitPrice', 'price'], default: 'relevance', description: 'relevance keeps each store\'s ranking; unitPrice sorts by price per kg, litre or piece, each unit in its own group' },
       stores: {
         type: 'array',
         items: { type: 'string', enum: ['shufersal', 'rami-levy'] },
@@ -120,7 +120,13 @@ export async function searchAllStores(stores, args = {}, { timeoutMs = 45_000, c
     }
   });
   // Array.prototype.sort is stable, so equal ranks keep the stores' order.
-  if (sortBy === 'unitPrice') results.sort(compareItems);
+  if (sortBy === 'unitPrice') {
+    // Prices per kg, litre and piece are not comparable: each unit is sorted as its own group,
+    // groups in the order they first appear by relevance, items without a unit price last.
+    const groups = [...new Set(results.filter((r) => r.perUnit).sort((a, b) => a.rank - b.rank).map((r) => r.perUnit))];
+    const group = (r) => (r.perUnit ? groups.indexOf(r.perUnit) : groups.length);
+    results.sort((a, b) => group(a) - group(b) || compareItems(a, b));
+  }
   else if (sortBy === 'price') results.sort((a, b) => (a.price ?? Infinity) - (b.price ?? Infinity));
   else results.sort((a, b) => a.rank - b.rank);
   // The catalogs are Hebrew; a Latin or Cyrillic query usually finds nothing useful.

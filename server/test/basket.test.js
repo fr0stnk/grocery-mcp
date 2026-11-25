@@ -212,3 +212,26 @@ test('compareBasket prices a past order: barcode first, name as fallback, grams 
   await assert.rejects(compareBasket([store('shufersal')], { source: { store: 'rami-levy' } }, { cache: new SearchCache() }), (e) => e.code === 'STORE_UNAVAILABLE');
 });
 
+test('comparable leaves out different sizes and counts; kg quantities prefer per-kg products (review GROC-051-01/02)', async () => {
+  const catalog = {
+    shufersal: {
+      'ביצים': [p('shufersal', 'E18', null, 21.81, { name: 'ביצים ארוזות L', count: 18 })],
+      'חלב': [p('shufersal', 'M1', '111', 7.35, { size: '1 L' })],
+      'בננות': [p('shufersal', 'drink', '777', 12.5, { name: 'משקה בננה' }), p('shufersal', 'B', null, 11.9, { name: 'בננה', priceBasis: 'kg', soldByWeight: true })],
+    },
+    'rami-levy': {
+      'ביצים': [p('rami-levy', 'E12', null, 14.5, { name: 'ביצים 12 יח L', count: 12 })],
+      'חלב': [p('rami-levy', 'M2', '111', 7.2, { size: '1 L' })],
+      'בננות': [p('rami-levy', 'drink', '777', 9.9, { name: 'משקה חלב בננה' }), p('rami-levy', 'B', null, 8.9, { name: 'בננה', priceBasis: 'kg', soldByWeight: true })],
+    },
+  };
+  const store = (id) => ({ id, label: id, search: { maxLimit: 20, run: async ({ query }) => named(catalog[id][query], query) } });
+  const out = await compareBasket([store('shufersal'), store('rami-levy')], { items: [{ query: 'ביצים' }, { query: 'חלב' }, { query: 'בננות', quantity: 1.5 }] }, { cache: new SearchCache() });
+  const [eggs, milk, bananas] = out.items;
+  assert.equal(eggs.notEquivalent, '18 vs 12 units');
+  assert.equal(milk.notEquivalent, undefined);
+  assert.deepEqual([bananas.offers.shufersal.productId, bananas.offers['rami-levy'].productId, bananas.identical], ['B', 'B', false], 'fresh bananas per kg, not the shared-barcode drink');
+  assert.deepEqual(out.comparable, { items: 2, identicalItems: 1, leftOut: [{ query: 'ביצים', reason: '18 vs 12 units' }], shufersal: 25.2, 'rami-levy': 20.55, cheaperStore: 'rami-levy', difference: 4.65 });
+  assert.deepEqual([out.totals.shufersal.total, out.totals['rami-levy'].total], [47.01, 35.05], 'store totals still include every item');
+});
+

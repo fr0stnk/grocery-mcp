@@ -62,3 +62,12 @@ test('Hebrew plurals match by stem and are retried in the singular when nothing 
   assert.deepEqual([none.items, none.retriedAs], [[], undefined]);
 });
 
+test('sortBy unitPrice keeps kg, litre and piece prices in separate groups (review GROC-051-06)', async () => {
+  const mixed = [
+    store('shufersal', [{ store: 'shufersal', productId: 'a', name: 'בננה', price: 11.9, pricePerUnit: 11.9, perUnit: 'kg' }, { store: 'shufersal', productId: 'b', name: 'משקה בננה', price: 9.9, pricePerUnit: 9.9, perUnit: 'L' }]),
+    store('rami-levy', [{ store: 'rami-levy', productId: 'c', name: 'בננה', price: 8.9, pricePerUnit: 8.9, perUnit: 'kg' }, { store: 'rami-levy', productId: 'd', name: 'בננה צ\'יפס', price: 7, pricePerUnit: null, perUnit: null }]),
+  ];
+  const out = await searchAllStores(mixed, { query: 'בננה', sortBy: 'unitPrice' }, { cache: new SearchCache() });
+  assert.deepEqual(out.results.map((r) => `${r.pricePerUnit}/${r.perUnit}`), ['8.9/kg', '11.9/kg', '9.9/L', 'null/null']);
+});
+

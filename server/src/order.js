@@ -94,25 +94,36 @@ async function checkShufersal(store, it, cache) {
   return { ...it, productId: product.productId, name: product.name, price: product.price, priceBasis: 'unit', priceSource: 'server' };
 }
 
-/** Rami Levy's catalog cannot look up an id, so a product outside recent results is searched for by its name. */
-async function ramiProduct(store, it, cache) {
+/**
+ * Rami Levy's catalog cannot look up an id. A product outside recent search
+ * results is searched for live: by the barcode it had when this server last
+ * saw it (price history, two days), otherwise by that name or the caller's.
+ */
+async function ramiProduct(store, it, cache, history) {
   const known = await lookup(store, it.productId, cache);
-  if (known || !it.name) return known;
+  if (known) return known;
+  const seen = history ? await history.lastSeen(store.id, it.productId).catch(() => null) : null;
+  const queries = [seen?.barcode, it.name, seen?.name].filter(Boolean);
+  if (!queries.length) return null;
   try {
-    const hit = await searchStore(store, it.name, { cache });
-    return hit.value.find((x) => x.store === store.id && x.productId === it.productId) ?? null;
+    for (const q of [...new Set(queries)]) {
+      const hit = await searchStore(store, q, { cache });
+      const found = hit.value.find((x) => x.store === store.id && x.productId === it.productId);
+      if (found) return found;
+    }
+    return null;
   } catch {
     return undefined;
   }
 }
 
-async function checkRamiLevy(store, it, cache) {
-  const product = await ramiProduct(store, it, cache);
+async function checkRamiLevy(store, it, cache, history) {
+  const product = await ramiProduct(store, it, cache, history);
   if (product === undefined) return reject(it, 'STORE_UNAVAILABLE', 'Rami Levy could not be searched to check this product');
   if (!product) {
     return reject(it, 'PRODUCT_NOT_VERIFIED', it.name
       ? `${it.productId} was not found when searching Rami Levy for "${it.name}"; search for the product and use a productId from the results`
-      : `${it.productId} is not in recent search results; search for the product first, or pass its name so it can be looked up`);
+      : `${it.productId} has not been seen in searches through this server in the last two days; search for it first, or pass its name so it can be looked up`);
   }
   if (product.inStock === false) return reject(it, 'OUT_OF_STOCK', `${product.name} is not sold at this branch`);
   const basis = product.priceBasis ?? 'unit';
@@ -153,14 +164,14 @@ function summary(store, dryRun, results) {
   };
 }
 
-export async function addBasketToCart(stores, args = {}, { cache = searchCache } = {}) {
+export async function addBasketToCart(stores, args = {}, { cache = searchCache, history = null } = {}) {
   const items = parseRequest(args);
   const store = stores.find((s) => s.id === args.store);
   if (!store) throw new StoreError(`${args.store} is not configured on this server`, 'STORE_UNAVAILABLE');
   const dryRun = Boolean(args.dry_run);
 
   const check = store.id === 'shufersal' ? checkShufersal : checkRamiLevy;
-  const checked = await Promise.all(items.map((it) => check(store, it, cache)));
+  const checked = await Promise.all(items.map((it) => check(store, it, cache, history)));
   const valid = checked.filter((c) => c.status !== 'rejected');
   const describe = (c, status) => ({ productId: c.productId, name: c.name, quantity: c.quantity, price: c.price, priceSource: c.priceSource, status, ...(c.priceChanged ? { priceChanged: c.priceChanged } : {}) });
 
