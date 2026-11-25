@@ -148,7 +148,7 @@ jobs:
           echo "rami=$(git -C upstream/rami-levy-mcp rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "shufersal=$(git -C upstream/shufersal-cart rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - id: meta
-        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ghcr.io/${{ github.repository_owner }}/grocery-mcp-${{ matrix.target }}
           tags: |
