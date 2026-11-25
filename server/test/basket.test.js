@@ -5,6 +5,8 @@ import { normalizeShufersalRaw } from '../src/normalize.js';
 import { createLimiter, SearchCache } from '../src/cache.js';
 
 const p = (store, productId, barcode, price, extra = {}) => ({ store, productId, barcode, name: productId, price, ...extra });
+// Fixtures named only by id get the query in their name, as real search results would carry it.
+const named = (list, query) => (list ?? []).map((x) => (x.name === x.productId ? { ...x, name: `${query} ${x.productId}` } : x));
 
 test('SearchCache reuses fresh results, refetches after the TTL and falls back to stale data', async () => {
   let now = 0;
@@ -78,7 +80,7 @@ test('compareBasket totals each store, compares common items and reports the spl
     shufersal: { 'חלב': [p('shufersal', 'P_1', '111', 7.35)], 'פסטה': [p('shufersal', 'P_2', '222', 5)], 'אבוקדו': [] },
     'rami-levy': { 'חלב': [p('rami-levy', '10', '111', 7.2)], 'פסטה': [p('rami-levy', '20', '222', 4.2, { promotions: [{ text: '4 for 10', quantity: 4, price: 10 }] })], 'אבוקדו': [p('rami-levy', '30', null, 12.9, { soldByWeight: true, priceBasis: 'kg', pricePerUnit: 12.9, perUnit: 'kg' })] },
   };
-  const store = (id) => ({ id, label: id, search: { maxLimit: 20, run: async ({ query }) => catalog[id][query] ?? [] } });
+  const store = (id) => ({ id, label: id, search: { maxLimit: 20, run: async ({ query }) => named(catalog[id][query], query) } });
   const out = await compareBasket([store('shufersal'), store('rami-levy')], {
     items: [{ query: 'חלב', quantity: 2 }, { query: 'פסטה', quantity: 4 }, { query: 'אבוקדו', quantity: 1.5 }],
   }, { cache: new SearchCache() });
@@ -95,7 +97,7 @@ test('compareBasket totals each store, compares common items and reports the spl
 });
 
 test('compareBasket reports a failing store and keeps the other', async () => {
-  const ok = { id: 'rami-levy', label: 'Rami Levy', search: { maxLimit: 20, run: async () => [p('rami-levy', '10', '111', 7.2)] } };
+  const ok = { id: 'rami-levy', label: 'Rami Levy', search: { maxLimit: 20, run: async () => [p('rami-levy', '10', '111', 7.2, { name: 'חלב 3%' })] } };
   const down = { id: 'shufersal', label: 'Shufersal', search: { maxLimit: 20, run: async () => { throw new Error('login required'); } } };
   const out = await compareBasket([down, ok], { items: [{ query: 'חלב' }] }, { cache: new SearchCache() });
   assert.deepEqual(out.stores.shufersal, { ok: false, error: 'login required' });
@@ -128,7 +130,7 @@ test('compareBasket honours the requested size, count and grade (review G-01)', 
       'ביצים 12 L': [p('rami-levy', '40', null, 14.5, { name: 'ביצים 12 יח גדול L', count: 12 }), p('rami-levy', '41', null, 12, { name: 'ביצים ארוזות L' })],
     },
   };
-  const store = (id) => ({ id, label: id, search: { maxLimit: 20, run: async ({ query }) => catalog[id][query] ?? [] } });
+  const store = (id) => ({ id, label: id, search: { maxLimit: 20, run: async ({ query }) => named(catalog[id][query], query) } });
   const out = await compareBasket([store('shufersal'), store('rami-levy')], { items: [{ query: 'חלב 3% 1 ליטר', quantity: 2 }, { query: 'ביצים 12 L' }] }, { cache: new SearchCache() });
   const [milk, eggs] = out.items;
   assert.deepEqual([milk.identical, milk.offers.shufersal.productId, milk.offers['rami-levy'].productId], [true, 'P_1L', '10'], '1 L, not the 2 L ranked first');
@@ -145,7 +147,7 @@ test('compareBasket does not multiply kilograms by a unit or package price (revi
     'rami-levy': { 'עגבניות': [p('rami-levy', '50', null, 10.7, { priceBasis: 'unit' })], 'בננה': [p('rami-levy', '51', null, 6.9, { priceBasis: 'kg', soldByWeight: true })] },
   };
   catalog.shufersal['בננה'] = [p('shufersal', 'P_B', null, 7.9, { priceBasis: 'kg', soldByWeight: true })];
-  const store = (id) => ({ id, label: id, search: { maxLimit: 20, run: async ({ query }) => catalog[id][query] ?? [] } });
+  const store = (id) => ({ id, label: id, search: { maxLimit: 20, run: async ({ query }) => named(catalog[id][query], query) } });
   const out = await compareBasket([store('shufersal'), store('rami-levy')], { items: [{ query: 'עגבניות', quantity: 1.5 }, { query: 'בננה', quantity: 1.5 }] }, { cache: new SearchCache() });
   const [tomatoes, bananas] = out.items;
   assert.deepEqual([tomatoes.offers.shufersal.excluded, tomatoes.offers['rami-levy'].excluded, tomatoes.cheapestStore], ['INCOMPATIBLE_QUANTITY_BASIS', 'INCOMPATIBLE_QUANTITY_BASIS', null]);
@@ -166,6 +168,7 @@ test('compareBasket prices a past order: barcode first, name as fallback, grams 
       { code: 'P_4131074', name: 'חלב בקרטון 3% שומן', quantity: 2, sellingMethod: 'BY_UNIT', unit: 'unit' },
       { code: 'P_939995', name: 'פילה סלמון קפוא', quantity: 1150, sellingMethod: 'BY_PACKAGE', unit: 'g' },
       { code: 'P_7290000000001', name: 'מוצר ייחודי', quantity: 1, sellingMethod: 'BY_UNIT', unit: 'unit' },
+      { code: 'P_7296073453673', name: 'גבינה מגורדת', quantity: 250, sellingMethod: 'BY_PACKAGE', unit: 'g' },
     ],
   };
   const catalog = {
@@ -173,23 +176,26 @@ test('compareBasket prices a past order: barcode first, name as fallback, grams 
       '7290004131074': [p('shufersal', 'P_4131074', '7290004131074', 7.35)],
       'פילה סלמון קפוא': [p('shufersal', 'P_939995', null, 69.9, { priceBasis: 'kg', soldByWeight: true })],
       '7290000000001': [p('shufersal', 'P_7290000000001', '7290000000001', 12)],
+      '7296073453673': [p('shufersal', 'P_7296073453673', '7296073453673', 19.75, { priceBasis: 'package', priceEstimated: true, soldByWeight: true })],
     },
     'rami-levy': {
       '7290004131074': [p('rami-levy', '3025', '7290004131074', 7.2)],
       'פילה סלמון קפוא': [p('rami-levy', '417111', null, 81.4, { priceBasis: 'kg', soldByWeight: true })],
       'מוצר ייחודי': [p('rami-levy', '900', null, 10)],
+      'גבינה מגורדת': [p('rami-levy', '901', null, 39, { priceBasis: 'kg', soldByWeight: true })],
     },
   };
   const calls = [];
   const store = (id) => ({
     id, label: id,
-    search: { maxLimit: 20, run: async ({ query }) => catalog[id][query] ?? [] },
+    search: { maxLimit: 20, run: async ({ query }) => named(catalog[id][query], query) },
     callTool: async (tool, args) => { calls.push([id, tool, args]); return { content: [{ type: 'text', text: JSON.stringify(order) }] }; },
   });
   const out = await compareBasket([store('shufersal'), store('rami-levy')], { source: { store: 'shufersal' } }, { cache: new SearchCache() });
   assert.deepEqual(calls, [['shufersal', 'get_order', { order: 'latest' }]]);
   assert.deepEqual(out.source, { store: 'shufersal', order: '05782658', created: '2026-11-23 16:06', paid: 749.17 });
-  const [milk, salmon, unique] = out.items;
+  const [milk, salmon, unique, cheese] = out.items;
+  assert.deepEqual([cheese.quantity, cheese.packs, cheese.offers.shufersal.lineTotal, cheese.offers['rami-levy'].lineTotal], [0.25, 1, 19.75, 9.75], 'one pack, or its weight where sold by kg');
   assert.deepEqual([milk.identical, milk.offers.shufersal.lineTotal, milk.offers['rami-levy'].lineTotal], [true, 14.7, 14.4]);
   assert.deepEqual([salmon.quantity, salmon.offers.shufersal.lineTotal, salmon.offers['rami-levy'].lineTotal], [1.15, 80.39, 93.61]);
   assert.deepEqual([unique.offers['rami-levy'].productId, unique.offers['rami-levy'].matchedBy, unique.identical], ['900', 'name', false]);

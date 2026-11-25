@@ -1,5 +1,5 @@
 import { parseCount, parseSize, shufersalBarcode, StoreError } from './normalize.js';
-import { searchCache, searchStore, selectStores, storeStatus } from './search.js';
+import { relevantSearch, searchCache, searchStore, selectStores, storeStatus } from './search.js';
 
 const MAX_ITEMS = 40;
 const MAX_SOURCE_LINES = 80;
@@ -273,7 +273,8 @@ export async function sourceItems(stores, source) {
     lines = (body.items ?? []).map((i) => {
       const grams = i.unit === 'g' || (i.sellingMethod && i.sellingMethod !== 'BY_UNIT' && i.quantity >= 50);
       const code = shufersalBarcode(i.code);
-      return { name: i.name, code: i.code, barcode: code.barcode ?? undefined, quantity: grams ? round3(i.quantity / 1000) : i.quantity, ...(grams ? { unit: 'kg' } : {}) };
+      // A packaged line (BY_PACKAGE) is one pack of about that weight: priced per kg where a store sells it by weight, otherwise as one pack.
+      return { name: i.name, code: i.code, barcode: code.barcode ?? undefined, quantity: grams ? round3(i.quantity / 1000) : i.quantity, ...(grams && i.sellingMethod === 'BY_PACKAGE' ? { packs: 1 } : {}) };
     });
   } else {
     let id = order;
@@ -290,11 +291,18 @@ export async function sourceItems(stores, source) {
   if (lines.length > MAX_SOURCE_LINES) throw new StoreError(`order ${info.order} has more than ${MAX_SOURCE_LINES} lines`, 'INVALID_ARGUMENT');
   const items = lines
     .filter((l) => l.name && l.quantity > 0 && l.quantity <= 100)
-    .map((l) => ({ query: l.barcode ?? l.name, quantity: l.quantity, ...(l.barcode ? { barcode: l.barcode, fallbackQuery: l.name } : {}), pin: { [store.id]: l.code }, sourceLine: { name: l.name, code: l.code } }));
+    .map((l) => ({ query: l.barcode ?? l.name, quantity: l.quantity, ...(l.packs ? { packs: l.packs } : {}), ...(l.barcode ? { barcode: l.barcode, fallbackQuery: l.name } : {}), pin: { [store.id]: l.code }, sourceLine: { name: l.name, code: l.code } }));
   return { info, items };
 }
 
 const round3 = (n) => Math.round(n * 1000) / 1000;
+
+/** A search hit whose value holds only products related to the query (barcode and number queries are exact already). */
+async function relevantHit(store, query, opts) {
+  if (/^\d+$/.test(query)) return searchStore(store, query, opts);
+  const { hit, items } = await relevantSearch(store, query, opts);
+  return { ...hit, value: items };
+}
 
 export async function compareBasket(stores, args = {}, { timeoutMs = 45_000, cache = searchCache, preferences = null } = {}) {
   const selected = selectStores(stores, args.stores);
@@ -309,7 +317,7 @@ export async function compareBasket(stores, args = {}, { timeoutMs = 45_000, cac
     selected.flatMap((store) =>
       queries.map(async (q) => {
         try {
-          searches.set(`${store.id}|${q}`, { hit: await searchStore(store, q, { timeoutMs, cache }) });
+          searches.set(`${store.id}|${q}`, { hit: await relevantHit(store, q, { timeoutMs, cache }) });
         } catch (error) {
           searches.set(`${store.id}|${q}`, { error: error.message });
         }
@@ -347,7 +355,7 @@ export async function compareBasket(stores, args = {}, { timeoutMs = 45_000, cac
   await Promise.all(
     [...new Map(fallbacks.map(([s, q]) => [`${s.id}|${q}`, [s, q]])).values()].map(async ([s, q]) => {
       try {
-        searches.set(`${s.id}|${q}`, { hit: await searchStore(s, q, { timeoutMs, cache }) });
+        searches.set(`${s.id}|${q}`, { hit: await relevantHit(s, q, { timeoutMs, cache }) });
       } catch (error) {
         searches.set(`${s.id}|${q}`, { error: error.message });
       }
@@ -376,7 +384,8 @@ export async function compareBasket(stores, args = {}, { timeoutMs = 45_000, cac
       }
     }
     const offers = Object.fromEntries(selected.map((s) => {
-      const o = offer(matches[s.id], it.quantity);
+      const m = matches[s.id];
+      const o = offer(m, it.packs && m && (m.priceBasis ?? 'unit') !== 'kg' ? it.packs : it.quantity);
       return [s.id, o && byName.has(s.id) ? { ...o, matchedBy: 'name' } : o];
     }));
     return {
@@ -385,6 +394,7 @@ export async function compareBasket(stores, args = {}, { timeoutMs = 45_000, cac
       ...(Object.keys(constraints).length ? { constraints: { ...constraints, ...(constraints.size ? { size: constraints.size.label } : {}) } } : {}),
       ...(it.preference ? { preference: it.preference } : {}),
       quantity: it.quantity,
+      ...(it.packs ? { packs: it.packs, note: `about ${it.quantity} kg; stores selling it by weight are priced for that, others for ${it.packs} pack` } : {}),
       ...(it.barcode ? { barcode: it.barcode } : {}),
       identical,
       ...(identical ? { confidence: Object.values(offers).some((o) => o?.barcodeInferred) ? 'inferred' : 'exact' } : {}),

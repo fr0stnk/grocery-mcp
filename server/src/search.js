@@ -15,7 +15,7 @@ export const SEARCH_TOOL = {
     'into a Hebrew query first (молоко / milk → חלב). Retry with a simpler Hebrew term if nothing is found. Returns one list in each store\'s own ' +
     'relevance order, interleaved by rank (sortBy unitPrice or price for cheapest first), with per-store status. ' +
     'priceBasis says what price buys: unit, kg, or an estimated package; regularPrice, when present, is the price before a promotion already included in price. ' +
-    'Results sharing no word with the query are left out and counted in `stores.<id>.unrelatedHidden`. A store that fails is reported in `stores` and the other store still answers. ' +
+    'Results sharing no word with the query are left out and counted in `stores.<id>.unrelatedHidden`; a store with nothing related returns none, and a Hebrew plural with no match is retried in the singular (`retriedAs`). A store that fails is reported in `stores` and the other store still answers. ' +
     'Items with the same barcode in different stores are the same product and are grouped in `sameProduct` with the cheapest store; ' +
     'compare other items by name, size and pricePerUnit and say which you treat as equivalent. ' +
     '`promotions` lists multi-buy and club offers (unitPrice is the price per item under the offer); mention them when they change which store is cheaper. ' +
@@ -103,16 +103,16 @@ export async function searchAllStores(stores, args = {}, { timeoutMs = 45_000, c
   const selected = selectStores(stores, args.stores);
 
   const sortBy = ['relevance', 'unitPrice', 'price'].includes(args.sortBy) ? args.sortBy : 'relevance';
-  const outcomes = await Promise.allSettled(selected.map((store) => searchStore(store, query, { timeoutMs, cache })));
+  const outcomes = await Promise.allSettled(selected.map((store) => relevantSearch(store, query, { timeoutMs, cache })));
 
   const status = {};
   const results = [];
   outcomes.forEach((outcome, i) => {
     const store = selected[i];
     if (outcome.status === 'fulfilled') {
-      const { kept, hidden } = relevantOnly(outcome.value.value, query);
+      const { hit, items: kept, hidden, retriedAs } = outcome.value;
       const items = kept.slice(0, limit).map((item, index) => ({ ...item, rank: index + 1 }));
-      status[store.id] = { ...storeStatus(outcome.value, items.length), ...(hidden ? { unrelatedHidden: hidden } : {}) };
+      status[store.id] = { ...storeStatus(hit, items.length), ...(hidden ? { unrelatedHidden: hidden } : {}), ...(retriedAs ? { retriedAs } : {}) };
       results.push(...items);
     } else {
       const reason = outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason);
@@ -136,8 +136,10 @@ const wordsOf = (text) => String(text).toLocaleLowerCase().replace(/["'״׳()\-,
 /**
  * The stores' fuzzy search fills short result lists with unrelated products
  * (beef tongue for "frozen salmon fillet"). Results sharing no word with the
- * query are dropped, unless nothing matches at all: then the store may know a
- * synonym, and everything is kept. Barcode and number queries are not filtered.
+ * query are dropped, even when that leaves nothing: Rami Levy's search reads
+ * "בננות" (bananas) as "בנות" (girls) and answers with girls' socks. A Hebrew
+ * plural also matches by its stem (בננות, בננ-), so "בננה" counts. Barcode and
+ * number queries are not filtered.
  * The catalogs are Hebrew, so a query with no Hebrew letters (a brand such as
  * "milka", or an untranslated "lactose free milk") must match every word, and
  * nothing is kept when no product does: one shared English word is not a match.
@@ -145,16 +147,53 @@ const wordsOf = (text) => String(text).toLocaleLowerCase().replace(/["'״׳()\-,
 export function relevantOnly(items, query) {
   if (/^\d+$/.test(query.trim())) return { kept: items, hidden: 0 };
   // Numbers and sizes ("12", "3%", "500") say nothing about what the product is.
-  const words = wordsOf(query).filter((w) => !/\d/.test(w)).map((w) => [w, w.replace(HEBREW_PREFIX, '')]);
+  const words = wordsOf(query).filter((w) => !/\d/.test(w)).map((w) => {
+    const bare = w.replace(HEBREW_PREFIX, '');
+    // A leading ב/ה/ו may be a prefix ("בחלב") or part of the word ("בננות"), so both readings count.
+    return [w, bare, stemOf(w), stemOf(bare)];
+  });
   if (!words.length) return { kept: items, hidden: 0 };
   const foreign = !/[\u0590-\u05FF]/.test(query);
   const related = (item) => {
     const text = `${item.name} ${item.brand ?? ''}`.toLocaleLowerCase();
-    const has = ([w, bare]) => text.includes(w) || text.includes(bare);
+    const has = (forms) => forms.some((f) => f && text.includes(f));
     return foreign ? words.every(has) : words.some(has);
   };
   const kept = items.filter(related);
-  return kept.length || foreign ? { kept, hidden: items.length - kept.length } : { kept: items, hidden: 0 };
+  return { kept, hidden: items.length - kept.length };
+}
+
+/** A Hebrew plural's stem: בננות → בננ, תפוחים → תפוח. Short words are left alone. */
+function stemOf(word) {
+  return /^[\u0590-\u05FF]{3,}(ות|ים)$/u.test(word) ? word.slice(0, -2) : null;
+}
+
+/** Singular forms to retry a plural query with: בננות → בננה, עגבניות → עגבניה, תפוחים → תפוח. */
+export function singularQueries(query) {
+  const out = [];
+  for (const w of String(query).split(/\s+/)) {
+    const stem = stemOf(w);
+    if (!stem) continue;
+    const forms = w.endsWith('ות') ? [`${stem}ה`, stem] : [stem, `${stem}ה`];
+    for (const f of forms) out.push(query.replace(w, f));
+  }
+  return [...new Set(out)].slice(0, 2);
+}
+
+/**
+ * A store's results for a query with unrelated products removed. When nothing
+ * fits, a Hebrew plural is retried in the singular (`retriedAs`).
+ */
+export async function relevantSearch(store, query, opts = {}) {
+  const hit = await searchStore(store, query, opts);
+  const { kept, hidden } = relevantOnly(hit.value, query);
+  if (kept.length) return { hit, items: kept, hidden };
+  for (const alt of singularQueries(query)) {
+    const retry = await searchStore(store, alt, opts).catch(() => null);
+    const again = retry ? relevantOnly(retry.value, query) : { kept: [] };
+    if (again.kept.length) return { hit: retry, items: again.kept, hidden, retriedAs: alt };
+  }
+  return { hit, items: [], hidden };
 }
 
 /** Products sold by more than one store, matched by barcode, cheapest first within each group. */
