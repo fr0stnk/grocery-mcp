@@ -373,7 +373,7 @@ export async function sourceItems(stores, source) {
   if (lines.length > MAX_SOURCE_LINES) throw new StoreError(`order ${info.order} has more than ${MAX_SOURCE_LINES} lines`, 'INVALID_ARGUMENT');
   const items = lines
     .filter((l) => l.name && l.quantity > 0 && l.quantity <= 100)
-    .map((l) => ({ query: l.barcode ?? l.name, quantity: l.quantity, ...(l.packs ? { packs: l.packs } : {}), ...(l.barcode ? { barcode: l.barcode, fallbackQuery: l.name } : {}), pin: { [store.id]: l.code }, sourceLine: { name: l.name, code: l.code } }));
+    .map((l) => ({ query: l.barcode ?? l.name, quantity: l.quantity, ...(l.packs ? { packs: l.packs } : {}), ...(l.barcode ? { barcode: l.barcode, fallbackQuery: l.name, label: l.name } : {}), pin: { [store.id]: l.code }, sourceLine: { name: l.name, code: l.code } }));
   return { info, items };
 }
 
@@ -500,7 +500,7 @@ export async function compareBasket(stores, args = {}, { timeoutMs = 45_000, cac
     const equivalence = identical ? null : equivalenceOf(Object.values(offers).filter(isPriced));
     return {
       query: it.label ?? it.query,
-      ...(it.barcode && !it.sourceLine ? { searchedBy: 'barcode' } : {}),
+      ...(it.barcode ? { searchedBy: 'barcode' } : {}),
       ...(it.sourceLine ? { sourceLine: it.sourceLine } : {}),
       ...(equivalence && equivalence !== 'match' ? { notEquivalent: equivalence } : {}),
       ...(Object.keys(constraints).length ? { constraints: { ...constraints, ...(constraints.size ? { size: constraints.size.label } : {}) } } : {}),
