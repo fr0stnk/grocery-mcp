@@ -2,9 +2,6 @@ name: grocery-mcp
 services:
   rami-levy:
     image: ${GROCERY_IMAGE_PREFIX:-ghcr.io/fr0stnk/grocery-mcp}-rami-levy:${GROCERY_IMAGE_TAG:-latest}
-    build:
-      context: .
-      target: rami-levy
     stdin_open: true
     environment:
       - RAMI_LEVY_BEARER_TOKEN
@@ -17,9 +14,6 @@ services:
 
   shufersal:
     image: ${GROCERY_IMAGE_PREFIX:-ghcr.io/fr0stnk/grocery-mcp}-shufersal:${GROCERY_IMAGE_TAG:-latest}
-    build:
-      context: .
-      target: shufersal
     stdin_open: true
     environment:
       - SHUFERSAL_USERNAME
@@ -29,9 +23,6 @@ services:
 
   grocery:
     image: ${GROCERY_IMAGE_PREFIX:-ghcr.io/fr0stnk/grocery-mcp}-grocery:${GROCERY_IMAGE_TAG:-latest}
-    build:
-      context: .
-      target: grocery
     stdin_open: true
     environment:
       - RAMI_LEVY_BEARER_TOKEN

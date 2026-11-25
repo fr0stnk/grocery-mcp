@@ -52,7 +52,7 @@ python3 scripts/setup_openai_tunnel.py
 
 ### 4. Start the services
 
-Pull the images first with `docker compose -f compose.yaml -f compose.tunnel.yaml pull grocery-http tunnel`, or build them. The `tunnel` image is a small Debian image with CA certificates, and the binary is mounted into it.
+Pull the images first with `docker compose -f compose.yaml -f compose.tunnel.yaml pull grocery-http tunnel`, or build them locally by adding `-f compose.build.yaml`. The `tunnel` image is a small Debian image with CA certificates, and the binary is mounted into it.
 
 ```sh
 docker compose -f compose.yaml -f compose.tunnel.yaml up -d grocery-http tunnel

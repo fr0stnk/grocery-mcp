@@ -31,7 +31,7 @@ Prebuilt images for `linux/amd64` and `linux/arm64`, such as a Raspberry Pi, are
 docker compose pull
 ```
 
-To build locally instead, run `docker compose build`. The containers use Node 22.
+To build locally instead, add `compose.build.yaml`: `docker compose -f compose.yaml -f compose.build.yaml build`. The other compose files carry no build instructions, so a server never builds an image by accident; a missing image fails as a pull error. The containers use Node 22.
 
 Then create your private `.env` from the example and fill it in as described in [Credentials](#credentials):
 

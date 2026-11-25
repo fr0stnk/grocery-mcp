@@ -1,0 +1,16 @@
+# Local image builds only. The other compose files name published images and
+# carry no build instructions, so a server never builds an image by accident:
+# a missing image is a pull error instead. Use with the files you run, e.g.
+#   docker compose -f compose.yaml -f compose.build.yaml build
+#   docker compose -f compose.yaml -f compose.tunnel.yaml -f compose.build.yaml build grocery-http tunnel
+services:
+  rami-levy:
+    build: { context: ., target: rami-levy }
+  shufersal:
+    build: { context: ., target: shufersal }
+  grocery:
+    build: { context: ., target: grocery }
+  grocery-http:
+    build: { context: ., target: grocery }
+  tunnel:
+    build: { context: ., target: tunnel }

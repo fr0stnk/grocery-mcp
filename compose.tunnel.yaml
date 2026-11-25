@@ -3,9 +3,6 @@
 #   docker compose -f compose.yaml -f compose.tunnel.yaml up -d grocery-http tunnel
 x-tunnel-client: &tunnel-client
   image: ${GROCERY_IMAGE_PREFIX:-ghcr.io/fr0stnk/grocery-mcp}-tunnel:${GROCERY_IMAGE_TAG:-latest}
-  build:
-    context: .
-    target: tunnel
   restart: unless-stopped
   depends_on: [grocery-http]
   network_mode: host
@@ -27,9 +24,6 @@ x-tunnel-client: &tunnel-client
 services:
   grocery-http:
     image: ${GROCERY_IMAGE_PREFIX:-ghcr.io/fr0stnk/grocery-mcp}-grocery:${GROCERY_IMAGE_TAG:-latest}
-    build:
-      context: .
-      target: grocery
     restart: unless-stopped
     # Host networking keeps the listener on loopback only and uses the host's
     # DNS, so no port is published and no bridge DNS workaround is needed.
