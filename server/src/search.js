@@ -182,11 +182,14 @@ export function singularQueries(query) {
  * singular (`retriedAs`).
  */
 export async function relevantSearch(store, query, opts = {}) {
-  const hit = await searchStore(store, query, opts);
-  const { kept, hidden } = relevantOnly(hit.value, query);
-  if (kept.length) return { hit, items: kept, hidden };
   const bare = withoutPackaging(query);
-  for (const alt of [...new Set([bare, ...singularQueries(bare ?? query)].filter(Boolean))]) {
+  // Rami Levy's ranking rewards a literal "מארז" or "ארוז" (apple juice packs, packed chicken), and its names
+  // rarely carry those words, so it is searched without them. Shufersal's names do carry them.
+  const sent = store.id === 'rami-levy' && bare ? bare : query;
+  const hit = await searchStore(store, sent, opts);
+  const { kept, hidden } = relevantOnly(hit.value, query);
+  if (kept.length) return { hit, items: kept, hidden, ...(sent !== query ? { retriedAs: sent } : {}) };
+  for (const alt of [...new Set([bare, ...singularQueries(bare ?? query)].filter((q) => q && q !== sent))]) {
     const retry = await searchStore(store, alt, opts).catch(() => null);
     const again = retry ? relevantOnly(retry.value, query) : { kept: [] };
     if (again.kept.length) return { hit: retry, items: again.kept, hidden, retriedAs: alt };
