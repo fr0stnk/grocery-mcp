@@ -44,6 +44,16 @@ export function parseSize(text) {
   return { amount, unit, label: `${amount} ${unit}` };
 }
 
+const COUNT_RE = /(\d+)\s*(?:יחידות|יחי'|יח'|יח)(?=$|[\s,.;:)\-/])/u;
+
+/** Reads a pack count such as "12 יחידות" or "ביצים 12 יח גדול L"; a single unit returns null. */
+export function parseCount(text) {
+  if (typeof text !== 'string') return null;
+  const m = COUNT_RE.exec(text.replace(/[׳]/g, "'"));
+  const n = m ? Number(m[1]) : NaN;
+  return n > 1 && n <= 500 ? n : null;
+}
+
 /** A retail barcode (EAN-8, UPC-A, EAN-13 or GTIN-14); store-internal codes such as produce PLUs return null. */
 export function barcodeOf(value) {
   const digits = String(value ?? '').trim().replace(/^P_/, '');
@@ -94,10 +104,13 @@ function item(store, { productId, barcode = null, barcodeInferred = false, name,
   // A weighed item's price is per kilogram when the store says so; otherwise
   // it is not tied to the pack size, so no unit price is derived.
   const size = byWeight ? null : (parseSize(sizeText) ?? parseSize(name));
+  // Approximate counts on weighed produce ("כ-4 יחידות") are not pack counts.
+  const count = byWeight || size ? null : (parseCount(sizeText) ?? parseCount(name));
   let unitPrice = null;
   let perUnit = null;
   if (byWeight && pricedPerKg && p != null) [unitPrice, perUnit] = [p, 'kg'];
   else if (size && p != null) [unitPrice, perUnit] = [round(p / size.amount), size.unit];
+  else if (count && p != null) [unitPrice, perUnit] = [round(p / count), 'pc'];
   const basis = priceBasis ?? (!byWeight ? 'unit' : pricedPerKg ? 'kg' : 'package');
   return {
     store,
@@ -106,7 +119,8 @@ function item(store, { productId, barcode = null, barcodeInferred = false, name,
     ...(barcodeInferred ? { barcodeInferred: true } : {}),
     name: name ?? '',
     brand: brand || null,
-    size: size?.label ?? null,
+    size: size?.label ?? (count ? `${count} pcs` : null),
+    ...(count ? { count } : {}),
     price: p,
     ...(regularPrice != null && p != null && regularPrice > p + 0.005 ? { regularPrice } : {}),
     priceBasis: basis,

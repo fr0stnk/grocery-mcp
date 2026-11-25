@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { compareBasket, lineCost, pickMatches } from '../src/basket.js';
+import { compareBasket, constraintsOf, fitOf, lineCost, pickMatches } from '../src/basket.js';
+import { normalizeShufersalRaw } from '../src/normalize.js';
 import { createLimiter, SearchCache } from '../src/cache.js';
 
 const p = (store, productId, barcode, price, extra = {}) => ({ store, productId, barcode, name: productId, price, ...extra });
@@ -75,7 +76,7 @@ test('lineCost applies the best qualifying multi-buy and ignores club and person
 test('compareBasket totals each store, compares common items and reports the split', async () => {
   const catalog = {
     shufersal: { 'חלב': [p('shufersal', 'P_1', '111', 7.35)], 'פסטה': [p('shufersal', 'P_2', '222', 5)], 'אבוקדו': [] },
-    'rami-levy': { 'חלב': [p('rami-levy', '10', '111', 7.2)], 'פסטה': [p('rami-levy', '20', '222', 4.2, { promotions: [{ text: '4 for 10', quantity: 4, price: 10 }] })], 'אבוקדו': [p('rami-levy', '30', null, 12.9, { soldByWeight: true, pricePerUnit: 12.9, perUnit: 'kg' })] },
+    'rami-levy': { 'חלב': [p('rami-levy', '10', '111', 7.2)], 'פסטה': [p('rami-levy', '20', '222', 4.2, { promotions: [{ text: '4 for 10', quantity: 4, price: 10 }] })], 'אבוקדו': [p('rami-levy', '30', null, 12.9, { soldByWeight: true, priceBasis: 'kg', pricePerUnit: 12.9, perUnit: 'kg' })] },
   };
   const store = (id) => ({ id, label: id, search: { maxLimit: 20, run: async ({ query }) => catalog[id][query] ?? [] } });
   const out = await compareBasket([store('shufersal'), store('rami-levy')], {
@@ -102,3 +103,59 @@ test('compareBasket reports a failing store and keeps the other', async () => {
   assert.equal(out.items[0].offers.shufersal, null);
   assert.equal(out.comparable.items, 0);
 });
+
+test('constraintsOf reads size, count and grade, and fitOf rejects products that contradict them', () => {
+  assert.deepEqual(constraintsOf('חלב 3% 1 ליטר'), { size: { amount: 1, unit: 'L', label: '1 L' } });
+  assert.deepEqual(constraintsOf('ביצים 12 L'), { count: 12, grade: 'L' });
+  assert.deepEqual(constraintsOf('חלב 3%'), {}, 'a percentage is not a count');
+  const eggs = constraintsOf('ביצים 12 L');
+  assert.equal(fitOf({ name: 'ביצים 12 יח גדול L' }, eggs), 'match');
+  assert.equal(fitOf({ name: 'ביצים 18 יח L' }, eggs), '18 units, not 12');
+  assert.equal(fitOf({ name: 'ביצים 12 יח M' }, eggs), 'grade M, not L');
+  assert.equal(fitOf({ name: 'ביצים ארוזות L' }, eggs), 'unknown');
+  assert.equal(fitOf({ name: 'חלב', size: '2 L' }, constraintsOf('חלב 1 ליטר')), 'size 2 L, not 1 L');
+  assert.equal(fitOf({ name: 'חלב', size: '1 L' }, constraintsOf('חלב 1 ליטר')), 'match');
+});
+
+test('compareBasket honours the requested size, count and grade (review G-01)', async () => {
+  const catalog = {
+    shufersal: {
+      'חלב 3% 1 ליטר': [p('shufersal', 'P_2L', '222', 14.7, { size: '2 L' }), p('shufersal', 'P_1L', '111', 7.35, { size: '1 L' })],
+      'ביצים 12 L': [p('shufersal', 'P_18', null, 21.81, { name: 'ביצים 18 יח L', count: 18 }), p('shufersal', 'P_ML', null, 13, { name: 'ביצים 12 יח M', count: 12 })],
+    },
+    'rami-levy': {
+      'חלב 3% 1 ליטר': [p('rami-levy', '20', '222', 14.9, { size: '2 L' }), p('rami-levy', '10', '111', 7.2, { size: '1 L' })],
+      'ביצים 12 L': [p('rami-levy', '40', null, 14.5, { name: 'ביצים 12 יח גדול L', count: 12 }), p('rami-levy', '41', null, 12, { name: 'ביצים ארוזות L' })],
+    },
+  };
+  const store = (id) => ({ id, label: id, search: { maxLimit: 20, run: async ({ query }) => catalog[id][query] ?? [] } });
+  const out = await compareBasket([store('shufersal'), store('rami-levy')], { items: [{ query: 'חלב 3% 1 ליטר', quantity: 2 }, { query: 'ביצים 12 L' }] }, { cache: new SearchCache() });
+  const [milk, eggs] = out.items;
+  assert.deepEqual([milk.identical, milk.offers.shufersal.productId, milk.offers['rami-levy'].productId], [true, 'P_1L', '10'], '1 L, not the 2 L ranked first');
+  assert.deepEqual(milk.constraints, { size: '1 L' });
+  assert.equal(eggs.offers.shufersal, null, 'neither 18 L nor 12 M eggs are 12 L eggs');
+  assert.equal(eggs.offers['rami-levy'].productId, '40');
+  assert.deepEqual(out.totals.shufersal.missing, ['ביצים 12 L']);
+  assert.ok(out.notes.some((n) => /rather than offering a different one/.test(n)));
+});
+
+test('compareBasket does not multiply kilograms by a unit or package price (review G-02)', async () => {
+  const catalog = {
+    shufersal: { 'עגבניות': [p('shufersal', 'P_PKG', null, 8.9, { priceBasis: 'package', priceEstimated: true, soldByWeight: true })] },
+    'rami-levy': { 'עגבניות': [p('rami-levy', '50', null, 10.7, { priceBasis: 'unit' })], 'בננה': [p('rami-levy', '51', null, 6.9, { priceBasis: 'kg', soldByWeight: true })] },
+  };
+  catalog.shufersal['בננה'] = [p('shufersal', 'P_B', null, 7.9, { priceBasis: 'kg', soldByWeight: true })];
+  const store = (id) => ({ id, label: id, search: { maxLimit: 20, run: async ({ query }) => catalog[id][query] ?? [] } });
+  const out = await compareBasket([store('shufersal'), store('rami-levy')], { items: [{ query: 'עגבניות', quantity: 1.5 }, { query: 'בננה', quantity: 1.5 }] }, { cache: new SearchCache() });
+  const [tomatoes, bananas] = out.items;
+  assert.deepEqual([tomatoes.offers.shufersal.excluded, tomatoes.offers['rami-levy'].excluded, tomatoes.cheapestStore], ['INCOMPATIBLE_QUANTITY_BASIS', 'INCOMPATIBLE_QUANTITY_BASIS', null]);
+  assert.deepEqual([bananas.offers.shufersal.lineTotal, bananas.offers['rami-levy'].lineTotal], [11.85, 10.35]);
+  assert.deepEqual(out.totals.shufersal, { total: 11.85, itemsFound: 1, missing: [], notComparable: ['עגבניות'] });
+  assert.deepEqual([out.comparable.items, out.split.total], [1, 10.35]);
+});
+
+test('Shufersal egg packs keep their count and a price per egg (review G-06)', () => {
+  const [eggs] = normalizeShufersalRaw([{ code: 'P_1201589', name: 'ביצים טריות L', unitDescription: '12 יחידות', sellingMethod: { code: 'BY_UNIT' }, price: { value: 14.54 } }]);
+  assert.deepEqual([eggs.size, eggs.count, eggs.pricePerUnit, eggs.perUnit], ['12 pcs', 12, 1.21, 'pc']);
+});
+

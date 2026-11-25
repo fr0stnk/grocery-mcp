@@ -11,8 +11,8 @@ Grocery MCP brings Rami Levy and Shufersal shopping tools together in one self-h
 ## Retailer integrations
 
 - [Rami Levy](https://github.com/shaiu/rami-levy-mcp) lives in `upstream/rami-levy-mcp`.
-- [Rami Levy](https://github.com/shaiu/rami-levy-mcp) is pinned to the fork [`fr0stnk/rami-levy-mcp`](https://github.com/fr0stnk/rami-levy-mcp), which adds `rami_levy_add_items` (many products with one cart sync), offered upstream.
-- [Shufersal](https://github.com/digitalbastard103/shufersal-cart) lives in `upstream/shufersal-cart`. It is pinned to the fork [`fr0stnk/shufersal-cart`](https://github.com/fr0stnk/shufersal-cart), which adds cart-validation fixes offered upstream: pinned codes are checked, malformed quantities are rejected, duplicates add up, summaries cover every line, and variant codes are accepted.
+- [Rami Levy](https://github.com/shaiu/rami-levy-mcp) is pinned to the fork [`fr0stnk/rami-levy-mcp`](https://github.com/fr0stnk/rami-levy-mcp), which adds `rami_levy_add_items` (many products with one cart sync), reports Rami Levy's 4xx answers as `not_found` or `rejected` instead of network errors, and adds `hasNext` to the order list. The first was offered upstream.
+- [Shufersal](https://github.com/digitalbastard103/shufersal-cart) lives in `upstream/shufersal-cart`. It is pinned to the fork [`fr0stnk/shufersal-cart`](https://github.com/fr0stnk/shufersal-cart), which adds cart-validation fixes offered upstream: pinned codes are checked, malformed quantities are rejected, duplicates add up (a product whose lines exceed 30 units is refused as a whole), summaries cover every line, variant codes are accepted, and order quantities say whether they are units or grams.
 
 ## Clone with both integrations
 

@@ -1,4 +1,4 @@
-import { StoreError } from './normalize.js';
+import { parseCount, parseSize, StoreError } from './normalize.js';
 import { searchCache, searchStore, selectStores, storeStatus } from './search.js';
 
 const MAX_ITEMS = 40;
@@ -52,15 +52,75 @@ function usable(list) {
   return inStock.length ? inStock : priced;
 }
 
+const GRADE = /^(xs|s|m|l|xl|xxl)$/i;
+
+/**
+ * What the query pins down beyond its words: a pack size ("1 ליטר"), a count
+ * ("ביצים 12") and an egg-style grade ("L"). Products that contradict any of
+ * them are not the requested item.
+ */
+export function constraintsOf(query) {
+  const text = String(query ?? '');
+  const size = parseSize(text);
+  const withoutSize = size ? text.replace(/(\d+(?:[.,]\d+)?)\s*\S+/u, ' ') : text;
+  const countMatch = /(?:^|\s)(\d{1,3})(?:\s*(?:יחידות|יח'?))?(?=$|\s)/u.exec(withoutSize);
+  const grade = text.split(/\s+/).find((w) => GRADE.test(w));
+  return {
+    ...(size ? { size } : {}),
+    ...(countMatch && !size ? { count: Number(countMatch[1]) } : {}),
+    ...(grade ? { grade: grade.toUpperCase() } : {}),
+  };
+}
+
+/** A product's size from its normalized label ("1 L", "0.5 kg") or, failing that, its name. */
+function sizeOf(x) {
+  const m = /^(\d+(?:\.\d+)?) (L|kg)$/.exec(x.size ?? '');
+  return m ? { amount: Number(m[1]), unit: m[2], label: x.size } : parseSize(x.name ?? '');
+}
+const close = (a, b) => Math.abs(a - b) <= Math.max(a, b) * 0.02;
+
+/** 'match', 'unknown' (cannot be checked) or a reason the product does not fit. */
+export function fitOf(product, constraints) {
+  let unknown = false;
+  if (constraints.size) {
+    const s = sizeOf(product);
+    if (!s) unknown = true;
+    else if (s.unit !== constraints.size.unit || !close(s.amount, constraints.size.amount)) return `size ${s.label}, not ${constraints.size.label}`;
+  }
+  if (constraints.count) {
+    const n = product.count ?? parseCount(product.name);
+    if (n == null) unknown = true;
+    else if (n !== constraints.count) return `${n} units, not ${constraints.count}`;
+  }
+  if (constraints.grade) {
+    const grades = String(product.name ?? '').split(/[\s,()]+/).filter((w) => GRADE.test(w)).map((w) => w.toUpperCase());
+    if (!grades.length) unknown = true;
+    else if (!grades.includes(constraints.grade)) return `grade ${grades.join('/')}, not ${constraints.grade}`;
+  }
+  return unknown ? 'unknown' : 'match';
+}
+
+/**
+ * Keeps the products that fit the query's constraints, those that verifiably
+ * fit first. `rejected` counts products left out for contradicting them.
+ */
+function fitting(list, constraints) {
+  if (!Object.keys(constraints).length) return { list, rejected: 0 };
+  const scored = list.map((x) => [x, fitOf(x, constraints)]);
+  const ok = scored.filter(([, f]) => f === 'match').map(([x]) => x);
+  const unknown = scored.filter(([, f]) => f === 'unknown').map(([x]) => ({ ...x, fit: 'unverified' }));
+  return { list: [...ok, ...unknown], rejected: scored.length - ok.length - unknown.length };
+}
+
 /**
  * Chooses one product per store for an item. A pinned barcode must match
  * exactly. Otherwise a barcode found in every store wins, preferring the one
  * ranked highest by the stores' own relevance; failing that, each store's
  * first usable result.
  */
-export function pickMatches(listsByStore, { barcode } = {}) {
+export function pickMatches(listsByStore, { barcode, constraints = {} } = {}) {
   const ids = Object.keys(listsByStore);
-  const lists = Object.fromEntries(ids.map((id) => [id, usable(listsByStore[id] ?? [])]));
+  const lists = Object.fromEntries(ids.map((id) => [id, barcode ? usable(listsByStore[id] ?? []) : fitting(usable(listsByStore[id] ?? []), constraints).list]));
   if (barcode) {
     const matches = Object.fromEntries(ids.map((id) => [id, lists[id].find((x) => x.barcode === barcode) ?? null]));
     return { matches, identical: ids.length > 1 && ids.every((id) => matches[id]) };
@@ -95,8 +155,12 @@ export function lineCost(match, quantity) {
   return best;
 }
 
+const FRACTIONAL = 'INCOMPATIBLE_QUANTITY_BASIS';
+
 function offer(match, quantity) {
   if (!match) return null;
+  // A fractional quantity means kilograms; it cannot be multiplied by a unit or package price.
+  if (!Number.isInteger(quantity) && (match.priceBasis ?? 'unit') !== 'kg') return { excluded: FRACTIONAL, productId: match.productId, name: match.name, priceBasis: match.priceBasis ?? 'unit' };
   const clubOffer = match.promotions?.find((p) => p.clubOnly)?.text;
   return {
     productId: match.productId,
@@ -107,14 +171,17 @@ function offer(match, quantity) {
     ...(match.priceEstimated ? { priceEstimated: true } : {}),
     ...(match.barcodeInferred ? { barcodeInferred: true } : {}),
     ...(match.size ? { size: match.size } : {}),
+    ...(match.fit ? { fit: match.fit } : {}),
     ...lineCost(match, quantity),
     ...(clubOffer ? { clubOffer } : {}),
     ...(match.soldByWeight ? { soldByWeight: true } : {}),
   };
 }
 
+const isPriced = (o) => Boolean(o && !o.excluded);
+
 function cheapest(offers) {
-  const priced = Object.entries(offers).filter(([, o]) => o);
+  const priced = Object.entries(offers).filter(([, o]) => isPriced(o));
   if (priced.length < 2) return null;
   priced.sort((a, b) => a[1].lineTotal - b[1].lineTotal);
   return priced[0][1].lineTotal === priced[1][1].lineTotal ? null : priced[0][0];
@@ -193,10 +260,12 @@ export async function compareBasket(stores, args = {}, { timeoutMs = 45_000, cac
 
   const lines = items.map((it) => {
     const lists = Object.fromEntries(selected.map((s) => [s.id, searches.get(`${s.id}|${it.query}`)?.hit?.value ?? []]));
-    const { matches, identical } = pickMatches(lists, { barcode: it.barcode });
+    const constraints = it.barcode ? {} : constraintsOf(it.query);
+    const { matches, identical } = pickMatches(lists, { barcode: it.barcode, constraints });
     const offers = Object.fromEntries(selected.map((s) => [s.id, offer(matches[s.id], it.quantity)]));
     return {
       query: it.query,
+      ...(Object.keys(constraints).length ? { constraints: { ...constraints, ...(constraints.size ? { size: constraints.size.label } : {}) } } : {}),
       ...(it.preference ? { preference: it.preference } : {}),
       quantity: it.quantity,
       ...(it.barcode ? { barcode: it.barcode } : {}),
@@ -209,15 +278,17 @@ export async function compareBasket(stores, args = {}, { timeoutMs = 45_000, cac
 
   const totals = {};
   for (const s of selected) {
-    const found = lines.filter((l) => l.offers[s.id]);
+    const found = lines.filter((l) => isPriced(l.offers[s.id]));
+    const excluded = lines.filter((l) => l.offers[s.id]?.excluded).map((l) => l.query);
     totals[s.id] = {
       total: round(found.reduce((sum, l) => sum + l.offers[s.id].lineTotal, 0)),
       itemsFound: found.length,
       missing: lines.filter((l) => !l.offers[s.id]).map((l) => l.query),
+      ...(excluded.length ? { notComparable: excluded } : {}),
     };
   }
 
-  const common = lines.filter((l) => selected.every((s) => l.offers[s.id]));
+  const common = lines.filter((l) => selected.every((s) => isPriced(l.offers[s.id])));
   const comparable = { items: common.length, identicalItems: common.filter((l) => l.identical).length };
   for (const s of selected) comparable[s.id] = round(common.reduce((sum, l) => sum + l.offers[s.id].lineTotal, 0));
   if (selected.length > 1 && common.length) {
@@ -226,14 +297,17 @@ export async function compareBasket(stores, args = {}, { timeoutMs = 45_000, cac
     comparable.difference = round(ranked.at(-1)[1] - ranked[0][1]);
   }
 
-  const splitLines = lines.filter((l) => Object.values(l.offers).some(Boolean));
-  const split = round(splitLines.reduce((sum, l) => sum + Math.min(...Object.values(l.offers).filter(Boolean).map((o) => o.lineTotal)), 0));
+  const splitLines = lines.filter((l) => Object.values(l.offers).some(isPriced));
+  const split = round(splitLines.reduce((sum, l) => sum + Math.min(...Object.values(l.offers).filter(isPriced).map((o) => o.lineTotal)), 0));
   const commonSplit = round(common.reduce((sum, l) => sum + Math.min(...selected.map((s) => l.offers[s.id].lineTotal)), 0));
   const bestSingle = common.length ? Math.min(...selected.map((s) => comparable[s.id])) : null;
 
   const notes = ['Delivery fees, minimum order amounts and club prices are not included.'];
   if (lines.some((l) => Object.values(l.offers).some((o) => o?.soldByWeight))) notes.push('For weighed items the quantity is kilograms and the price is per kilogram where the store says so.');
-  if (lines.some((l) => !l.identical && Object.values(l.offers).filter(Boolean).length > 1)) notes.push('Items with identical: false compare different products; check that they are acceptable substitutes.');
+  if (lines.some((l) => !l.identical && Object.values(l.offers).filter(isPriced).length > 1)) notes.push('Items with identical: false compare different products; check that they are acceptable substitutes.');
+  if (lines.some((l) => Object.values(l.offers).some((o) => o?.excluded))) notes.push('A fractional quantity is kilograms; products sold by unit or package cannot be priced for it and are listed in notComparable. Ask for whole units, or choose a product sold by weight.');
+  if (lines.some((l) => Object.values(l.offers).some((o) => o?.fit === 'unverified'))) notes.push('Offers with fit: unverified could not be checked against the size, count or grade in the query; confirm them.');
+  if (lines.some((l) => l.constraints && Object.values(l.offers).some((o) => !o))) notes.push('A store with no product matching the size, count or grade in the query lists the item as missing rather than offering a different one.');
   for (const [id, st] of Object.entries(status)) if (st.stale) notes.push(`${id} did not answer; its prices are cached from ${st.fetchedAt}.`);
 
   return {

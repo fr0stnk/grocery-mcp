@@ -90,7 +90,10 @@ test('Rami Levy adds every checked product in one call, with the server\'s own n
     product('rami-levy', '1', { name: 'עגבניות', price: 30.6, priceBasis: 'kg' }),
     product('rami-levy', '2', { inStock: false }),
   ]);
-  const store = fakeStore('rami-levy', { respond: () => text({ ok: false, reason: 'items_rejected', rejected: [{ productId: '1', name: 'עגבניות' }], serverTotal: 34.8 }) });
+  const store = fakeStore('rami-levy', {
+    catalog: { 'from the client': [product('rami-levy', '777', { name: 'found by name', price: 5.5 })], fake: [] },
+    respond: () => text({ ok: false, reason: 'items_rejected', rejected: [{ productId: '1', name: 'עגבניות' }], serverTotal: 34.8 }),
+  });
   const out = await addBasketToCart([store], { store: 'rami-levy', items: [
     { productId: '329258', name: 'wrong name', price: 12, quantity: 2 },
     { productId: '1', quantity: 0.5 },
@@ -98,31 +101,38 @@ test('Rami Levy adds every checked product in one call, with the server\'s own n
     { productId: '329258', quantity: 1.5 },
     { productId: '777', name: 'from the client', price: 5 },
     { productId: '888' },
+    { productId: '999999999999', name: 'fake', price: 1 },
   ] }, { cache });
 
   assert.deepEqual(store.calls, [['rami_levy_add_items', { items: [
     { productId: '329258', name: 'חלב 3% טרה 2 ליטר', price: 14.9, qty: 2 },
     { productId: '1', name: 'עגבניות', price: 30.6, qty: 0.5 },
-    { productId: '777', name: 'from the client', price: 5, qty: 1 },
+    { productId: '777', name: 'found by name', price: 5.5, qty: 1 },
   ] }]]);
   assert.deepEqual(out.results[0].priceChanged, { requested: 12, current: 14.9 });
   assert.deepEqual(out.results.map((r) => r.status === 'rejected' ? r.code : `${r.status}:${r.priceSource}`), [
-    'added:server', 'STORE_REJECTED', 'OUT_OF_STOCK', 'INVALID_QUANTITY', 'added:client', 'MISSING_OFFER_DETAILS',
+    'added:server', 'STORE_REJECTED', 'OUT_OF_STOCK', 'INVALID_QUANTITY', 'added:server', 'PRODUCT_NOT_VERIFIED', 'PRODUCT_NOT_VERIFIED',
   ]);
-  assert.deepEqual([out.requested, out.added, out.rejected, out.complete, out.serverTotal], [6, 2, 4, false, 34.8]);
+  assert.deepEqual(out.results[4].priceChanged, { requested: 5, current: 5.5 }, 'a product found by name is priced by the server');
+  assert.deepEqual([out.requested, out.added, out.rejected, out.complete, out.serverTotal], [7, 2, 5, false, 34.8]);
 });
 
 test('Rami Levy reports a failed sync as a store error, and dry runs change nothing', async () => {
   const items = [1, 2, 3].map((n) => ({ productId: String(n), name: `item ${n}`, price: 1 }));
+  const seeded = async () => {
+    const cache = new SearchCache();
+    await seed(cache, 'rami-levy', 'x', items.map((i) => product('rami-levy', i.productId, { name: i.name, price: 1 })));
+    return cache;
+  };
   const expired = fakeStore('rami-levy', { respond: () => text({ ok: false, reason: 'auth_expired', status: 401 }) });
-  await assert.rejects(addBasketToCart([expired], { store: 'rami-levy', items }, { cache: new SearchCache() }), (e) => e.code === 'STORE_ERROR' && /auth_expired/.test(e.message) && !e.retryable);
+  await assert.rejects(addBasketToCart([expired], { store: 'rami-levy', items }, { cache: await seeded() }), (e) => e.code === 'STORE_ERROR' && /auth_expired/.test(e.message) && !e.retryable);
 
   const fine = fakeStore('rami-levy', { respond: () => text({ ok: true, serverTotal: 3, resetAfterOrder: { orderId: 5 } }) });
-  const done = await addBasketToCart([fine], { store: 'rami-levy', items }, { cache: new SearchCache() });
+  const done = await addBasketToCart([fine], { store: 'rami-levy', items }, { cache: await seeded() });
   assert.deepEqual([fine.calls.length, done.added, done.complete, done.resetAfterOrder.orderId], [1, 3, true, 5]);
 
   const preview = fakeStore('rami-levy');
-  const dry = await addBasketToCart([preview], { store: 'rami-levy', items, dry_run: true }, { cache: new SearchCache() });
+  const dry = await addBasketToCart([preview], { store: 'rami-levy', items, dry_run: true }, { cache: await seeded() });
   assert.deepEqual([preview.calls.length, dry.dryRun, dry.accepted, dry.complete], [0, true, 3, true]);
 });
 

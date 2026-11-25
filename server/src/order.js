@@ -11,7 +11,8 @@ export const ADD_BASKET_TOOL = {
     'Add several products to one store\'s real cart in a single step, usually the chosen store\'s offers from compare_basket. ' +
     'Pass each offer\'s productId and quantity. The server checks every product before anything is added, with the same checks in a dry run: ' +
     'unknown products, out-of-stock items and (for Shufersal) items sold by weight or package are rejected with a code, ' +
-    'and Rami Levy names and prices come from the server\'s own search results rather than the request. ' +
+    'and Rami Levy names and prices come from the server\'s own search results rather than the request ' +
+    '(a Rami Levy product outside recent results is looked up by its name, and refused as PRODUCT_NOT_VERIFIED if not found). ' +
     'Each item gets a status (added, would-add or rejected); complete is false when anything was rejected. Quantities are added to what is ' +
     'already in the cart. Use dry_run: true to preview. Nothing is ordered or paid. Show the user the list and store before calling.',
   annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
@@ -28,8 +29,8 @@ export const ADD_BASKET_TOOL = {
           properties: {
             productId: { type: 'string', minLength: 1, maxLength: 64, description: 'The offer\'s productId (P_… for Shufersal)' },
             quantity: { type: 'number', exclusiveMinimum: 0, maximum: 100, default: 1, description: 'Units, or kilograms for Rami Levy items priced per kg' },
-            name: { type: 'string', description: 'Rami Levy only, used when the product is not in recent search results' },
-            price: { type: 'number', minimum: 0, description: 'Rami Levy only, used when the product is not in recent search results' },
+            name: { type: 'string', description: 'Rami Levy only: the product name, used to look the product up when it is not in recent search results' },
+            price: { type: 'number', minimum: 0, description: 'Rami Levy only: the price the user saw; a different current price is reported as priceChanged' },
           },
           required: ['productId'],
           additionalProperties: false,
@@ -93,17 +94,31 @@ async function checkShufersal(store, it, cache) {
   return { ...it, productId: product.productId, name: product.name, price: product.price, priceBasis: 'unit', priceSource: 'server' };
 }
 
-async function checkRamiLevy(store, it, cache) {
-  const product = await lookup(store, it.productId, cache);
-  if (product?.inStock === false) return reject(it, 'OUT_OF_STOCK', `${product.name} is not sold at this branch`);
-  const basis = product?.priceBasis ?? 'unit';
-  if (basis === 'unit' && !Number.isInteger(it.quantity)) return reject(it, 'INVALID_QUANTITY', 'this product is sold by unit; use a whole number');
-  if (product) {
-    const changed = it.price != null && Math.abs(it.price - product.price) >= 0.005 ? { priceChanged: { requested: it.price, current: product.price } } : {};
-    return { ...it, name: product.name, price: product.price, priceBasis: basis, priceSource: 'server', ...changed };
+/** Rami Levy's catalog cannot look up an id, so a product outside recent results is searched for by its name. */
+async function ramiProduct(store, it, cache) {
+  const known = await lookup(store, it.productId, cache);
+  if (known || !it.name) return known;
+  try {
+    const hit = await searchStore(store, it.name, { cache });
+    return hit.value.find((x) => x.store === store.id && x.productId === it.productId) ?? null;
+  } catch {
+    return undefined;
   }
-  if (!it.name || it.price == null) return reject(it, 'MISSING_OFFER_DETAILS', 'not in recent search results; search for it first or pass its name and price');
-  return { ...it, priceBasis: basis, priceSource: 'client' };
+}
+
+async function checkRamiLevy(store, it, cache) {
+  const product = await ramiProduct(store, it, cache);
+  if (product === undefined) return reject(it, 'STORE_UNAVAILABLE', 'Rami Levy could not be searched to check this product');
+  if (!product) {
+    return reject(it, 'PRODUCT_NOT_VERIFIED', it.name
+      ? `${it.productId} was not found when searching Rami Levy for "${it.name}"; search for the product and use a productId from the results`
+      : `${it.productId} is not in recent search results; search for the product first, or pass its name so it can be looked up`);
+  }
+  if (product.inStock === false) return reject(it, 'OUT_OF_STOCK', `${product.name} is not sold at this branch`);
+  const basis = product.priceBasis ?? 'unit';
+  if (basis === 'unit' && !Number.isInteger(it.quantity)) return reject(it, 'INVALID_QUANTITY', 'this product is sold by unit; use a whole number');
+  const changed = it.price != null && Math.abs(it.price - product.price) >= 0.005 ? { priceChanged: { requested: it.price, current: product.price } } : {};
+  return { ...it, name: product.name, price: product.price, priceBasis: basis, priceSource: 'server', ...changed };
 }
 
 /** Raises a product already in the Shufersal cart by the requested quantity, then checks the cart. */

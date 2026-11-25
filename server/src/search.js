@@ -127,17 +127,23 @@ const wordsOf = (text) => String(text).toLocaleLowerCase().replace(/["'״׳()\-,
  * (beef tongue for "frozen salmon fillet"). Results sharing no word with the
  * query are dropped, unless nothing matches at all: then the store may know a
  * synonym, and everything is kept. Barcode and number queries are not filtered.
+ * The catalogs are Hebrew, so a query with no Hebrew letters (a brand such as
+ * "milka", or an untranslated "lactose free milk") must match every word, and
+ * nothing is kept when no product does: one shared English word is not a match.
  */
 export function relevantOnly(items, query) {
   if (/^\d+$/.test(query.trim())) return { kept: items, hidden: 0 };
-  const words = wordsOf(query).map((w) => [w, w.replace(HEBREW_PREFIX, '')]);
+  // Numbers and sizes ("12", "3%", "500") say nothing about what the product is.
+  const words = wordsOf(query).filter((w) => !/\d/.test(w)).map((w) => [w, w.replace(HEBREW_PREFIX, '')]);
   if (!words.length) return { kept: items, hidden: 0 };
+  const foreign = !/[\u0590-\u05FF]/.test(query);
   const related = (item) => {
     const text = `${item.name} ${item.brand ?? ''}`.toLocaleLowerCase();
-    return words.some(([w, bare]) => text.includes(w) || text.includes(bare));
+    const has = ([w, bare]) => text.includes(w) || text.includes(bare);
+    return foreign ? words.every(has) : words.some(has);
   };
   const kept = items.filter(related);
-  return kept.length ? { kept, hidden: items.length - kept.length } : { kept: items, hidden: 0 };
+  return kept.length || foreign ? { kept, hidden: items.length - kept.length } : { kept: items, hidden: 0 };
 }
 
 /** Products sold by more than one store, matched by barcode, cheapest first within each group. */
