@@ -171,3 +171,13 @@ test('Shufersal weighed products are sent as weight_kg in 0.5 kg steps, packs as
   assert.deepEqual(out.results.map((r) => r.status === 'rejected' ? r.code : r.status), ['added', 'added', 'INVALID_QUANTITY', 'INVALID_QUANTITY']);
 });
 
+test('Shufersal packaged produce: a kg amount is refused with the number of packs to pass, and a dry run shows the pack estimate', async () => {
+  const cache = new SearchCache();
+  await seed(cache, 'shufersal', 'עגבניות', [product('shufersal', 'P_7296073440314', { name: 'עגבניה ארוזה', price: 8.9, priceBasis: 'kg', soldByWeight: true, sellingMethod: 'BY_PACKAGE', packWeightKg: 1, packPrice: 8.9 })]);
+  const store = fakeStore('shufersal');
+  const out = await addBasketToCart([store], { store: 'shufersal', dry_run: true, items: [{ productId: 'P_7296073440314', quantity: 2.5 }, { productId: 'P_7296073440314', quantity: 3 }] }, { cache });
+  assert.deepEqual([out.results[0].code, out.results[0].suggestedQuantity], ['INVALID_QUANTITY', 3]);
+  assert.match(out.results[0].message, /2\.5 kg is 3 packs, so pass quantity 3/);
+  assert.deepEqual([out.results[1].status, out.results[1].packWeightKg, out.results[1].pricePerKg, out.results[1].estimatedTotal, out.results[1].priceEstimated], ['would-add', 1, 8.9, 26.7, true]);
+});
+

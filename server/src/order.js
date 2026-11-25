@@ -1,4 +1,5 @@
 import { StoreError } from './normalize.js';
+import { packsFor } from './basket.js';
 import { searchCache, searchStore } from './search.js';
 
 const MAX_ITEMS = 60;
@@ -95,6 +96,11 @@ async function checkShufersal(store, it, cache) {
   if (method === 'BY_WEIGHT') {
     if (!(it.quantity >= 0.5 && Number.isInteger(it.quantity * 2))) return reject(it, 'INVALID_QUANTITY', `${product.name} is sold by weight in steps of 0.5 kg; give the weight in kg, e.g. 1.5`);
   } else if (!Number.isInteger(it.quantity)) {
+    // A kilogram amount for packaged produce: say how many packs that is, the same rounding as compare_basket.
+    if (method === 'BY_PACKAGE' && product.packWeightKg) {
+      const packs = packsFor(it.quantity, product.packWeightKg);
+      return { ...reject(it, 'INVALID_QUANTITY', `${product.name} is sold in packs of about ${product.packWeightKg} kg; ${it.quantity} kg is ${packs} pack${packs === 1 ? '' : 's'}, so pass quantity ${packs}`), suggestedQuantity: packs };
+    }
     return reject(it, 'INVALID_QUANTITY', `${product.name} is sold by ${method === 'BY_PACKAGE' ? 'pack' : 'unit'}; use a whole number`);
   }
   const pack = method === 'BY_PACKAGE' && product.packPrice ? { price: product.packPrice, priceBasis: 'package', priceEstimated: true, packWeightKg: product.packWeightKg, pricePerKg: product.price } : {};
@@ -180,7 +186,11 @@ export async function addBasketToCart(stores, args = {}, { cache = searchCache, 
   const check = store.id === 'shufersal' ? checkShufersal : checkRamiLevy;
   const checked = await Promise.all(items.map((it) => check(store, it, cache, history)));
   const valid = checked.filter((c) => c.status !== 'rejected');
-  const describe = (c, status) => ({ productId: c.productId, name: c.name, quantity: c.quantity, price: c.price, priceSource: c.priceSource, status, ...(c.priceChanged ? { priceChanged: c.priceChanged } : {}) });
+  const describe = (c, status) => ({
+    productId: c.productId, name: c.name, quantity: c.quantity, price: c.price, priceSource: c.priceSource, status,
+    ...(c.packWeightKg ? { priceBasis: 'package', priceEstimated: true, packWeightKg: c.packWeightKg, pricePerKg: c.pricePerKg, estimatedTotal: Math.round(c.quantity * c.price * 100) / 100 } : {}),
+    ...(c.priceChanged ? { priceChanged: c.priceChanged } : {}),
+  });
 
   if (dryRun || !valid.length) return summary(store.id, dryRun, checked.map((c) => (c.status === 'rejected' ? c : describe(c, dryRun ? 'would-add' : 'not-attempted'))));
 
