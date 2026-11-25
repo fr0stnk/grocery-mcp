@@ -67,6 +67,8 @@ function usable(list) {
 }
 
 const GRADE = /^(xs|s|m|l|xl|xxl)$/i;
+// How far down each store's list a product sold in every store may be to win.
+const SHARED_TOP = 3;
 
 /**
  * What the query pins down beyond its words: a pack size ("1 ליטר"), a count
@@ -128,9 +130,9 @@ function fitting(list, constraints) {
 
 /**
  * Chooses one product per store for an item. A pinned barcode must match
- * exactly. Otherwise a barcode found in every store wins, preferring the one
- * ranked highest by the stores' own relevance; failing that, each store's
- * first usable result.
+ * exactly. Otherwise a barcode found among the top three results of every
+ * store wins, preferring the one ranked highest by the stores' own relevance;
+ * failing that, each store's first usable result.
  */
 export function pickMatches(listsByStore, { barcode, constraints = {} } = {}) {
   const ids = Object.keys(listsByStore);
@@ -147,7 +149,9 @@ export function pickMatches(listsByStore, { barcode, constraints = {} } = {}) {
     });
     let best = null;
     for (const [code] of ranks[0]) {
-      if (!ranks.every((r) => r.has(code))) continue;
+      // A shared barcode far down a store's list is a different kind of product
+      // (banana milk for "bananas", whose top results have no barcode).
+      if (!ranks.every((r) => r.has(code) && r.get(code) < SHARED_TOP)) continue;
       const score = ranks.reduce((sum, r) => sum + r.get(code), 0);
       if (!best || score < best.score) best = { code, score };
     }

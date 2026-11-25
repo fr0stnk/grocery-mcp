@@ -52,6 +52,13 @@ test('pickMatches prefers a barcode sold in every store, ranked by relevance', (
   const { matches, identical } = pickMatches(lists);
   assert.equal(identical, true);
   assert.deepEqual([matches.shufersal.productId, matches['rami-levy'].productId], ['S2', 'R2']);
+
+  const bananas = {
+    shufersal: [p('shufersal', 'banana', null, 11.9), p('shufersal', 'b2', null, 13), p('shufersal', 'b3', null, 9), p('shufersal', 'drink', '777', 12.5)],
+    'rami-levy': [p('rami-levy', 'banana', null, 8.9), p('rami-levy', 'drink', '777', 9.9)],
+  };
+  const fresh = pickMatches(bananas);
+  assert.deepEqual([fresh.identical, fresh.matches.shufersal.productId, fresh.matches['rami-levy'].productId], [false, 'banana', 'banana'], 'a shared barcode ranked 4th does not beat the top result');
 });
 
 test('pickMatches honors a pinned barcode, skips out-of-stock items and falls back to the top result', () => {
