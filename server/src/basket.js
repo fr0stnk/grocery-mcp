@@ -102,8 +102,28 @@ function sizeOf(x) {
 }
 const close = (a, b) => Math.abs(a - b) <= Math.max(a, b) * 0.02;
 
-/** 'match', 'unknown' (cannot be checked) or a reason the product does not fit. */
-export function fitOf(product, constraints) {
+// What a product states about an attribute, or null when it states nothing.
+const STATED = {
+  percent: (product) => {
+    const values = [...String(product.name ?? '').matchAll(new RegExp(PERCENT, 'gu'))].map((m) => Number(m[1].replace(',', '.')));
+    return values.length ? values : null;
+  },
+};
+// Attributes judged per store: when any candidate states one, a product that
+// states nothing is not taken on trust. "חלב 99%" is impossible where milks say
+// 1%, 2% or 3%, while "חלב 3%" keeps unlabelled milks where none say.
+const STRICT_WHEN_STATED = ['percent'];
+
+/** The constraints a store's candidates make checkable: those of STRICT_WHEN_STATED that at least one of them states. */
+export function statedIn(list, constraints) {
+  return STRICT_WHEN_STATED.filter((attr) => constraints[attr] != null && list.some((x) => STATED[attr](x) != null));
+}
+
+/**
+ * 'match', 'unknown' (cannot be checked) or a reason the product does not fit.
+ * An attribute listed in `strict` that the product does not state is a reason, not unknown.
+ */
+export function fitOf(product, constraints, { strict = [] } = {}) {
   let unknown = false;
   if (constraints.size) {
     const s = sizeOf(product);
@@ -121,9 +141,10 @@ export function fitOf(product, constraints) {
     else if (!grades.includes(constraints.grade)) return `grade ${grades.join('/')}, not ${constraints.grade}`;
   }
   if (constraints.percent != null) {
-    // Strict: a product that states no percentage is not taken for "חלב 99%".
-    const stated = [...String(product.name ?? '').matchAll(new RegExp(PERCENT, 'gu'))].map((m) => Number(m[1].replace(',', '.')));
-    if (!stated.includes(constraints.percent)) return stated.length ? `${stated.join('/')}%, not ${constraints.percent}%` : `no percentage stated, not ${constraints.percent}%`;
+    const stated = STATED.percent(product);
+    if (!stated && strict.includes('percent')) return `no percentage stated, not ${constraints.percent}%`;
+    if (!stated) unknown = true;
+    else if (!stated.includes(constraints.percent)) return `${stated.join('/')}%, not ${constraints.percent}%`;
   }
   return unknown ? 'unknown' : 'match';
 }
@@ -134,7 +155,8 @@ export function fitOf(product, constraints) {
  */
 function fitting(list, constraints) {
   if (!Object.keys(constraints).length) return { list, rejected: 0 };
-  const scored = list.map((x) => [x, fitOf(x, constraints)]);
+  const strict = statedIn(list, constraints);
+  const scored = list.map((x) => [x, fitOf(x, constraints, { strict })]);
   const ok = scored.filter(([, f]) => f === 'match').map(([x]) => x);
   const unknown = scored.filter(([, f]) => f === 'unknown').map(([x]) => ({ ...x, fit: 'unverified' }));
   return { list: [...ok, ...unknown], rejected: scored.length - ok.length - unknown.length };

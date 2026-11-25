@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { compareBasket } from '../src/basket.js';
+import { compareBasket, constraintsOf, fitOf, pickMatches, statedIn } from '../src/basket.js';
 import { SearchCache } from '../src/cache.js';
 import { bestCandidates, queryTerms } from '../src/match.js';
 import { relevantOnly } from '../src/search.js';
@@ -38,7 +38,19 @@ test('GROC-002: water never resolves to glassware, and a six-pack is marked as u
   assert.match(water.notEquivalent, /not asked for/);
 });
 
-test('GROC-003: a stated percentage is a hard constraint', async () => {
+test('GROC-003: a percentage another product contradicts excludes it; unknown only counts where no product states one', () => {
+  const threePct = constraintsOf('חלב 3%');
+  const labelled = [{ name: 'חלב 1% בקרטון', price: 6.9 }, { name: 'חלב טרי בקרטון', price: 7 }];
+  assert.equal(fitOf(labelled[0], threePct), '1%, not 3%', 'a contradiction always excludes');
+  assert.deepEqual(statedIn(labelled, threePct), ['percent']);
+  assert.match(fitOf(labelled[1], threePct, { strict: statedIn(labelled, threePct) }), /no percentage stated/, 'the store labels fat, so an unlabelled milk is not taken on trust');
+  const unlabelled = [{ name: 'חלב טרי בקרטון', price: 7 }, { name: 'חלב בבקבוק', price: 8 }];
+  assert.deepEqual(statedIn(unlabelled, threePct), []);
+  const pick = pickMatches({ shufersal: unlabelled }, { constraints: threePct, query: 'חלב 3%' }).matches.shufersal;
+  assert.deepEqual([pick.name, pick.fit], ['חלב טרי בקרטון', 'unverified'], 'a store that states no percentages keeps its milks, unverified');
+});
+
+test('GROC-003: a percentage no product has is missing', async () => {
   const impossible = await one('חלב 99% 1 ליטר');
   assert.deepEqual(names(impossible), [null, null]);
   const lowFat = await one('חלב תנובה 1% 1 ליטר');
