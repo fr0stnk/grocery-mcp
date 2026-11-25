@@ -141,3 +141,20 @@ test('GROC-009: Shufersal packaged produce is priced per kg and bought in whole 
   assert.equal(out.comparable.items, 1);
   assert.deepEqual([packsFor(0.2, 1), packsFor(1.4, 1)], [1, 1]);
 });
+
+test('GROC-007: a plural query falls back to the singular where the plural finds only variants', async () => {
+  const lists = {
+    'rami-levy': {
+      'עגבניות': [{ store: 'rami-levy', productId: '453030', name: 'עגבניות שרי לובלו רמי לוי', price: 10.7, priceBasis: 'unit' }],
+      'עגבניה': [{ store: 'rami-levy', productId: '2', name: 'עגבניה', price: 8.9, priceBasis: 'kg', soldByWeight: true }],
+    },
+  };
+  const searched = [];
+  const rami = { id: 'rami-levy', label: 'Rami Levy', search: { maxLimit: 20, run: async ({ query }) => { searched.push(query); return lists['rami-levy'][query] ?? []; } } };
+  const [line] = (await compareBasket([rami], { items: [{ query: 'עגבניות', quantity: 1 }] }, { cache: new SearchCache() })).items;
+  assert.deepEqual([line.offers['rami-levy'].productId, line.offers['rami-levy'].unrequested], ['2', undefined]);
+  assert.ok(searched.includes('עגבניה'));
+  searched.length = 0;
+  await compareBasket([rami], { items: [{ query: 'עגבניה', quantity: 1 }] }, { cache: new SearchCache() });
+  assert.deepEqual(searched, ['עגבניה'], 'a singular query with a plain match searches once');
+});

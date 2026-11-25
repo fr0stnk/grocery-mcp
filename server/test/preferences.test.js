@@ -62,8 +62,10 @@ test('resolveItems uses preferences, barcodes and the usual basket', () => {
   store.save({ name: 'bread', query: 'לחם אחיד', usual: true });
   store.save({ name: 'chocolate', query: 'שוקולד' });
 
-  assert.deepEqual(resolveItems({ items: [{ preference: 'MILK' }] }, store), [{ query: '7290102398065', quantity: 2, barcode: '7290102398065', preference: 'milk' }]);
+  assert.deepEqual(resolveItems({ items: [{ preference: 'MILK' }] }, store), [{ query: '7290102398065', quantity: 2, barcode: '7290102398065', label: 'milk', preference: 'milk' }]);
   assert.deepEqual(resolveItems({ items: [{ preference: 'milk', quantity: 5 }] }, store)[0].quantity, 5);
+  store.save({ name: 'butter', barcode: '7290000000017', query: 'חמאה 200 גרם' });
+  assert.equal(resolveItems({ items: [{ preference: 'butter' }] }, store)[0].label, 'חמאה 200 גרם', 'a saved query is the label');
   assert.deepEqual(resolveItems({ items: [{ barcode: '7290000000001' }] }, store)[0].query, '7290000000001');
   const usual = resolveItems({ usual: true, items: [{ preference: 'milk', quantity: 1 }, { query: 'ביצים' }] }, store);
   assert.deepEqual(usual.map((it) => [it.preference ?? it.query, it.quantity]), [['milk', 1], ['ביצים', 1], ['bread', 1]]);

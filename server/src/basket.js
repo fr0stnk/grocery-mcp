@@ -1,6 +1,6 @@
 import { bestCandidates } from './match.js';
 import { parseCount, parseSize, shufersalBarcode, StoreError } from './normalize.js';
-import { relevantSearch, searchCache, searchStore, selectStores, storeStatus } from './search.js';
+import { relevantOnly, relevantSearch, searchCache, searchStore, selectStores, singularQueries, storeStatus } from './search.js';
 
 const MAX_ITEMS = 40;
 const MAX_SOURCE_LINES = 80;
@@ -307,11 +307,14 @@ export function resolveItems(args, preferences) {
       quantity ??= saved.quantity;
     }
     barcode = typeof barcode === 'string' && barcode.trim() ? barcode.trim() : undefined;
-    query = barcode ?? (typeof query === 'string' ? query.trim() : '');
+    const typed = typeof query === 'string' ? query.trim() : '';
+    // The search runs by barcode, but the item is reported by the words the user knows it by.
+    const label = barcode ? typed || preference || undefined : undefined;
+    query = barcode ?? typed;
     if (!query) throw new StoreError(`item ${i + 1} needs a query, a barcode or a preference`, 'INVALID_ARGUMENT');
     quantity = quantity == null ? 1 : Number(quantity);
     if (!(quantity > 0 && quantity <= 100)) throw new StoreError(`item ${i + 1}: quantity must be above 0 and at most 100`, 'INVALID_QUANTITY');
-    return { query, quantity, barcode, ...(preference ? { preference } : {}) };
+    return { query, quantity, barcode, ...(label ? { label } : {}), ...(preference ? { preference } : {}) };
   });
 }
 
@@ -441,8 +444,26 @@ export async function compareBasket(stores, args = {}, { timeoutMs = 45_000, cac
     }),
   );
 
+  // A plural query whose best match in a store is a variant (cherry tomatoes for "עגבניות") also tries the
+  // singular there, where stores often list the plain product ("עגבניה", sold per kg).
+  const singular = new Map();
+  await Promise.all(
+    items.filter((it) => !it.barcode).flatMap((it) => selected.map(async (s) => {
+      const forms = singularQueries(it.query);
+      const list = searches.get(`${s.id}|${it.query}`)?.hit?.value ?? [];
+      if (!forms.length) return;
+      const best = bestCandidates(usable(list), it.query);
+      if (best.length && !best[0].unrequested) return;
+      for (const q of forms) {
+        const hit = await relevantSearch(s, q, { timeoutMs, cache }).catch(() => null);
+        const plain = hit ? relevantOnly(hit.items, it.query).kept : [];
+        if (plain.length) return singular.set(`${s.id}|${it.query}`, plain);
+      }
+    })),
+  );
+
   const lines = items.map((it) => {
-    const lists = Object.fromEntries(selected.map((s) => [s.id, searches.get(`${s.id}|${it.query}`)?.hit?.value ?? []]));
+    const lists = Object.fromEntries(selected.map((s) => [s.id, [...(searches.get(`${s.id}|${it.query}`)?.hit?.value ?? []), ...(singular.get(`${s.id}|${it.query}`) ?? [])]]));
     const constraints = it.barcode ? {} : constraintsOf(it.query);
     // A fractional quantity is kilograms: among the right products, prefer those sold per kg.
     const preferKg = !Number.isInteger(it.quantity);
@@ -475,7 +496,8 @@ export async function compareBasket(stores, args = {}, { timeoutMs = 45_000, cac
     const unrequested = [...new Set(Object.values(offers).flatMap((o) => o?.unrequested ?? []))];
     const equivalence = identical ? null : equivalenceOf(Object.values(offers).filter(isPriced));
     return {
-      query: it.query,
+      query: it.label ?? it.query,
+      ...(it.barcode && !it.sourceLine ? { searchedBy: 'barcode' } : {}),
       ...(it.sourceLine ? { sourceLine: it.sourceLine } : {}),
       ...(equivalence && equivalence !== 'match' ? { notEquivalent: equivalence } : {}),
       ...(Object.keys(constraints).length ? { constraints: { ...constraints, ...(constraints.size ? { size: constraints.size.label } : {}) } } : {}),

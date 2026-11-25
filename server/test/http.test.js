@@ -183,7 +183,7 @@ test('preferences drive compare_basket and add_basket_to_cart previews over HTTP
   assert.equal((await call('list_preferences', {})).preferences[0].name, 'Milk');
 
   const basket = await call('compare_basket', { usual: true });
-  assert.deepEqual([basket.items[0].preference, basket.items[0].quantity, basket.items[0].query], ['Milk', 2, '7290102398065']);
+  assert.deepEqual([basket.items[0].preference, basket.items[0].quantity, basket.items[0].query, basket.items[0].searchedBy, basket.items[0].barcode], ['Milk', 2, 'Milk', 'barcode', '7290102398065'], 'GROC-012: reported by name, searched by barcode');
   const offer = basket.items[0].offers.shufersal;
   assert.equal(offer.productId, 'P_7290102398065');
 
