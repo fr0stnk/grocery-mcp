@@ -30,3 +30,14 @@ test('queries without Hebrew letters get a translation hint, barcodes do not', a
   assert.match((await searchAllStores(stores(), { query: 'lactose free milk' }, { cache: new SearchCache() })).hint, /translate/);
   assert.equal((await searchAllStores(stores(), { query: '7290102398065' }, { cache: new SearchCache() })).hint, undefined);
 });
+
+test('results sharing no word with the query are hidden and counted, unless nothing matches', async () => {
+  const { relevantOnly } = await import('../src/search.js');
+  const items = ['פילה סלמון קפוא', 'לשון בקר', 'שניצל עוף', 'הסלמון של הים'].map((name) => ({ name, brand: null }));
+  const { kept, hidden } = relevantOnly(items, 'פילה סלמון קפוא');
+  assert.deepEqual([kept.map((i) => i.name), hidden], [['פילה סלמון קפוא', 'הסלמון של הים'], 2]);
+  assert.deepEqual(relevantOnly(items, 'קוויאר'), { kept: items, hidden: 0 }, 'no match at all keeps everything');
+  assert.deepEqual(relevantOnly(items, '7290003996018').hidden, 0, 'number queries are not filtered');
+  assert.equal(relevantOnly([{ name: 'MILKA שוקולד', brand: null }], 'milka').hidden, 0, 'case-insensitive');
+});
+

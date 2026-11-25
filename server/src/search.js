@@ -14,7 +14,8 @@ export const SEARCH_TOOL = {
     'Search Shufersal and Rami Levy at once. The catalogs are in Hebrew: use Hebrew requests as written, and translate Russian or English ones ' +
     'into a Hebrew query first (молоко / milk → חלב). Retry with a simpler Hebrew term if nothing is found. Returns one list in each store\'s own ' +
     'relevance order, interleaved by rank (sortBy unitPrice or price for cheapest first), with per-store status. ' +
-    'priceBasis says what price buys: unit, kg, or an estimated package. A store that fails is reported in `stores` and the other store still answers. ' +
+    'priceBasis says what price buys: unit, kg, or an estimated package; regularPrice, when present, is the price before a promotion already included in price. ' +
+    'Results sharing no word with the query are left out and counted in `stores.<id>.unrelatedHidden`. A store that fails is reported in `stores` and the other store still answers. ' +
     'Items with the same barcode in different stores are the same product and are grouped in `sameProduct` with the cheapest store; ' +
     'compare other items by name, size and pricePerUnit and say which you treat as equivalent. ' +
     '`promotions` lists multi-buy and club offers (unitPrice is the price per item under the offer); mention them when they change which store is cheaper. ' +
@@ -98,8 +99,9 @@ export async function searchAllStores(stores, args = {}, { timeoutMs = 45_000, c
   outcomes.forEach((outcome, i) => {
     const store = selected[i];
     if (outcome.status === 'fulfilled') {
-      const items = outcome.value.value.slice(0, limit).map((item, index) => ({ ...item, rank: index + 1 }));
-      status[store.id] = storeStatus(outcome.value, items.length);
+      const { kept, hidden } = relevantOnly(outcome.value.value, query);
+      const items = kept.slice(0, limit).map((item, index) => ({ ...item, rank: index + 1 }));
+      status[store.id] = { ...storeStatus(outcome.value, items.length), ...(hidden ? { unrelatedHidden: hidden } : {}) };
       results.push(...items);
     } else {
       const reason = outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason);
@@ -115,6 +117,27 @@ export async function searchAllStores(stores, args = {}, { timeoutMs = 45_000, c
     ? undefined
     : 'The store catalogs are in Hebrew and this query has no Hebrew letters; translate it to Hebrew (for example молоко or milk → חלב) and search again.';
   return { query, sortBy, ...(hint ? { hint } : {}), stores: status, sameProduct: groupByBarcode(results), results };
+}
+
+const HEBREW_PREFIX = /^[והבלמשכ](?=[\u0590-\u05FF]{3})/u;
+const wordsOf = (text) => String(text).toLocaleLowerCase().replace(/["'״׳()\-,.]/g, ' ').split(/\s+/).filter((w) => w.length >= 2 || /\d/.test(w));
+
+/**
+ * The stores' fuzzy search fills short result lists with unrelated products
+ * (beef tongue for "frozen salmon fillet"). Results sharing no word with the
+ * query are dropped, unless nothing matches at all: then the store may know a
+ * synonym, and everything is kept. Barcode and number queries are not filtered.
+ */
+export function relevantOnly(items, query) {
+  if (/^\d+$/.test(query.trim())) return { kept: items, hidden: 0 };
+  const words = wordsOf(query).map((w) => [w, w.replace(HEBREW_PREFIX, '')]);
+  if (!words.length) return { kept: items, hidden: 0 };
+  const related = (item) => {
+    const text = `${item.name} ${item.brand ?? ''}`.toLocaleLowerCase();
+    return words.some(([w, bare]) => text.includes(w) || text.includes(bare));
+  };
+  const kept = items.filter(related);
+  return kept.length ? { kept, hidden: items.length - kept.length } : { kept: items, hidden: 0 };
 }
 
 /** Products sold by more than one store, matched by barcode, cheapest first within each group. */

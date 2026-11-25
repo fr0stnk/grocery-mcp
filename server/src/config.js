@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { normalizeRamiCatalog, normalizeRamiLevy, normalizeShufersal, normalizeShufersalRaw } from './normalize.js';
+import { normalizeRamiCatalog, normalizeRamiLevy, normalizeShufersal, normalizeShufersalRaw, gs1Valid } from './normalize.js';
 import { fetchRamiCatalog } from './rami-catalog.js';
 import { fetchShufersalSearch } from './shufersal-search.js';
 import { StoreClient } from './stores.js';
@@ -49,7 +49,12 @@ function searchFor(def, env) {
       ...def.search,
       run: async ({ query, limit, fallback }) => {
         try {
-          const results = await fetchShufersalSearch(query, { cookieFile: env.SHUFERSAL_COOKIE_FILE, limit, origin: env.GROCERY_SHUFERSAL_ORIGIN || undefined });
+          const options = { cookieFile: env.SHUFERSAL_COOKIE_FILE, limit, origin: env.GROCERY_SHUFERSAL_ORIGIN || undefined };
+          let results = await fetchShufersalSearch(query, options);
+          // Shufersal's search does not know the full EAN of products whose code is
+          // its 7-digit tail (7290003996018 is P_3996018), but finds the tail.
+          const tail = /^729000(\d{7})$/.exec(query);
+          if (!results.length && tail && gs1Valid(query)) results = (await fetchShufersalSearch(tail[1], options)).filter((p) => p.code === `P_${tail[1]}`);
           return normalizeShufersalRaw(results).slice(0, limit);
         } catch (error) {
           process.stderr.write(`[grocery] shufersal direct search failed (${error.message}); using the adapter's search\n`);

@@ -127,3 +127,38 @@ test('weighed Shufersal items are priced per kilogram when Shufersal says so', (
   assert.deepEqual([salmon.priceBasis, salmon.pricePerUnit, salmon.perUnit, salmon.soldByWeight, salmon.priceEstimated], ['kg', 69.9, 'kg', true, undefined]);
   assert.deepEqual([unclear.priceBasis, unclear.priceEstimated, unclear.pricePerUnit], ['package', true, 50]);
 });
+
+test('a per-kg promotion makes a "price by weight" package a per-kg price, with the regular price beside it', () => {
+  const SALMON = { code: 'P_939995', sku: '939995', name: 'פילה סלמון קפוא', unitDescription: 'מחיר לפי משקל', sellingMethod: { code: 'BY_PACKAGE' },
+    price: { value: 69.9 }, pricePerUnit: { value: 79.9 }, valueForComparison: 1, unitForComparison: 'ק"ג', promotionMsg: ' ב- 69.90 ₪ לק"ג' };
+  const [salmon, noOffer] = normalizeShufersalRaw([SALMON, { ...SALMON, code: 'P_2', promotionMsg: null }]);
+  assert.deepEqual([salmon.price, salmon.regularPrice, salmon.priceBasis, salmon.priceEstimated, salmon.pricePerUnit, salmon.perUnit], [69.9, 79.9, 'kg', undefined, 69.9, 'kg']);
+  assert.deepEqual([noOffer.priceBasis, noOffer.priceEstimated, noOffer.regularPrice], ['package', true, undefined], 'an unexplained difference stays an estimate');
+});
+
+test('parseShufersalPromotion reads weight offers in kilograms', () => {
+  const [perKg] = parseShufersalPromotion(' ב- 69.90 ₪ לק"ג');
+  assert.deepEqual([perKg.quantity, perKg.price, perKg.unitPrice, perKg.perUnit], [null, null, 69.9, 'kg']);
+  const [bulk] = parseShufersalPromotion('3 ק"ג  ב- 49.98 ₪ ');
+  assert.deepEqual([bulk.quantity, bulk.price, bulk.unitPrice, bulk.perUnit], [3, 49.98, 16.66, 'kg']);
+});
+
+test('a full 729000 barcode Shufersal cannot find is looked up by its product number', async () => {
+  const LETTUCE = { ...PASTA, code: 'P_3996018', sku: '3996018', name: 'חסה ערבית', promotionMsg: null };
+  const queries = [];
+  const server = createServer((req, res) => {
+    const q = decodeURIComponent(new URL(req.url, 'http://x').searchParams.get('q')).split(':')[0];
+    queries.push(q);
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ results: q === '3996018' ? [{ ...LETTUCE, code: 'P_39960181' }, LETTUCE] : [] }));
+  });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  servers.push(server);
+  const [store] = createStores({ GROCERY_STORES: 'shufersal', SHUFERSAL_COOKIE_FILE: cookieFile([live('s', { domain: '127.0.0.1' })]), GROCERY_SHUFERSAL_ORIGIN: `http://127.0.0.1:${server.address().port}` });
+  const fallback = async () => assert.fail('no fallback expected');
+  const found = await store.search.run({ query: '7290003996018', limit: 5, fallback });
+  assert.deepEqual(found.map((r) => [r.productId, r.barcode, r.barcodeInferred]), [['P_3996018', '7290003996018', true]]);
+  assert.deepEqual(await store.search.run({ query: '7290003996019', limit: 5, fallback }), [], 'an invalid check digit is not retried');
+  assert.deepEqual(queries, ['7290003996018', '3996018', '7290003996019']);
+});
+

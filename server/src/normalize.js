@@ -89,7 +89,7 @@ function round(n, digits = 2) {
  * priceBasis says what `price` buys: one item ("unit"), one kilogram ("kg"), or
  * one package whose final charge depends on its weight ("package", estimated).
  */
-function item(store, { productId, barcode = null, barcodeInferred = false, name, brand = null, sizeText, price, inStock = null, byWeight = false, pricedPerKg = false, priceBasis, promotions = [] }) {
+function item(store, { productId, barcode = null, barcodeInferred = false, name, brand = null, sizeText, price, regularPrice = null, inStock = null, byWeight = false, pricedPerKg = false, priceBasis, promotions = [] }) {
   const p = parsePrice(price);
   // A weighed item's price is per kilogram when the store says so; otherwise
   // it is not tied to the pack size, so no unit price is derived.
@@ -108,6 +108,7 @@ function item(store, { productId, barcode = null, barcodeInferred = false, name,
     brand: brand || null,
     size: size?.label ?? null,
     price: p,
+    ...(regularPrice != null && p != null && regularPrice > p + 0.005 ? { regularPrice } : {}),
     priceBasis: basis,
     ...(basis === 'package' ? { priceEstimated: true } : {}),
     pricePerUnit: unitPrice,
@@ -179,14 +180,24 @@ export function parsePromotions(sale) {
     .filter((s) => s.text);
 }
 
-/** Shufersal's promotion text, such as "3 יח'  ב- 15 ₪" (3 units for 15); other wordings keep only the text. */
+const KG = 'ק["״]?ג';
+
+/**
+ * Shufersal's promotion text. Recognised wordings: "3 יח' ב- 15 ₪" (3 units
+ * for 15), "3 ק"ג ב- 49.98 ₪" (3 kg for 49.98) and "ב- 69.90 ₪ לק"ג" (69.90
+ * per kg). Weight offers carry perUnit "kg"; other wordings keep only the text.
+ */
 export function parseShufersalPromotion(message) {
   if (typeof message !== 'string' || !message.trim()) return [];
   const text = message.replace(/\s+/g, ' ').trim();
-  const m = /(\d+)\s*יח'?\s*ב\s*-?\s*(\d+(?:\.\d+)?)\s*₪/u.exec(text);
-  const quantity = m ? Number(m[1]) : null;
-  const price = m ? Number(m[2]) : null;
-  return [{ text, quantity, price, unitPrice: quantity && price ? round(price / quantity) : null, until: null, clubOnly: /מועדון/u.test(text), personal: false }];
+  const offer = (quantity, price, extra = {}) => [{ text, quantity, price, unitPrice: quantity && price ? round(price / quantity) : null, ...extra, until: null, clubOnly: /מועדון/u.test(text), personal: false }];
+  const units = /(\d+)\s*יח'?\s*ב\s*-?\s*(\d+(?:\.\d+)?)\s*₪/u.exec(text);
+  if (units) return offer(Number(units[1]), Number(units[2]));
+  const weight = new RegExp(`(\\d+(?:\\.\\d+)?)\\s*${KG}\\s*ב\\s*-?\\s*(\\d+(?:\\.\\d+)?)\\s*₪`, 'u').exec(text);
+  if (weight) return offer(Number(weight[1]), Number(weight[2]), { perUnit: 'kg' });
+  const perKg = new RegExp(`ב\\s*-?\\s*(\\d+(?:\\.\\d+)?)\\s*₪\\s*ל${KG}`, 'u').exec(text);
+  if (perKg) return [{ text, quantity: null, price: null, unitPrice: Number(perKg[1]), perUnit: 'kg', until: null, clubOnly: /מועדון/u.test(text), personal: false }];
+  return offer(null, null);
 }
 
 // Shufersal compares prices per valueForComparison of these units, e.g. per 100 גרם.
@@ -210,8 +221,13 @@ export function normalizeShufersalRaw(results) {
       const stock = p.stock?.stockLevelStatus?.code;
       const official = officialUnitPrice(p);
       const price = p.price?.value;
-      // A weighed item is priced per kilogram when Shufersal's own per-kg comparison price equals its price.
-      const perKg = method === 'BY_WEIGHT' && official?.perUnit === 'kg' && Math.abs(official.pricePerUnit - Number(price)) < 0.01;
+      const promotions = parseShufersalPromotion(p.promotionMsg);
+      // Items described as "price by weight" (מחיר לפי משקל) are weighed even when Shufersal lists them BY_PACKAGE.
+      const weighed = method === 'BY_WEIGHT' || /לפי משקל/u.test(p.unitDescription ?? '');
+      // A weighed item is priced per kilogram when Shufersal's own per-kg comparison price equals its price,
+      // or when a per-kg offer explains the difference: then the comparison price is the regular one.
+      const promoPerKg = promotions.some((o) => o.perUnit === 'kg' && o.quantity == null && Math.abs(o.unitPrice - Number(price)) < 0.01);
+      const perKg = weighed && official?.perUnit === 'kg' && (Math.abs(official.pricePerUnit - Number(price)) < 0.01 || promoPerKg);
       const code = shufersalBarcode(p.ean ?? p.sku ?? p.code);
       const normalized = item('shufersal', {
         productId: p.code,
@@ -221,10 +237,11 @@ export function normalizeShufersalRaw(results) {
         brand: p.brandName,
         sizeText: p.unitDescription,
         price,
+        regularPrice: perKg ? official.pricePerUnit : null,
         inStock: stock ? stock !== 'outOfStock' : null,
         byWeight: Boolean(method) && method !== 'BY_UNIT',
         pricedPerKg: perKg,
-        promotions: parseShufersalPromotion(p.promotionMsg),
+        promotions,
       });
       // When no unit price could be derived, use Shufersal's own comparison price
       // (for packaged produce this is per kilogram).
