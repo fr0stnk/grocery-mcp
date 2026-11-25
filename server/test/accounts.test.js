@@ -51,9 +51,19 @@ test('status checks each store live and explains how to renew', async () => {
   assert.match(out.warnings[0], /Rami Levy login failed/);
   assert.equal(out.checkedAt, new Date(NOW).toISOString());
 
+  assert.deepEqual([out.stores.shufersal.state, out.stores['rami-levy'].state], ['ok', 'rejected']);
+
   const broken = await monitorWith(null).status([{ id: 'shufersal', label: 'Shufersal', callTool: async () => { throw new Error('Shufersal failed to start'); } }]);
-  assert.deepEqual([broken.stores.shufersal.loggedIn, broken.stores.shufersal.detail], [false, 'Shufersal failed to start']);
-  const hung = await monitorWith(null).status([{ id: 'rami-levy', label: 'Rami Levy', callTool: () => new Promise(() => {}) }], { timeoutMs: 50 });
-  assert.match(hung.stores['rami-levy'].detail, /timed out/);
-  assert.equal(hung.stores['rami-levy'].token.expiresAt, null);
+  assert.deepEqual([broken.stores.shufersal.state, broken.stores.shufersal.loggedIn, broken.stores.shufersal.detail], ['unknown', null, 'Shufersal failed to start']);
+});
+
+test('a status probe that times out is unknown, not a login failure, and leaves no lasting warning', async () => {
+  const monitor = monitorWith(null);
+  const hung = await monitor.status([{ id: 'rami-levy', label: 'Rami Levy', callTool: () => new Promise(() => {}) }], { timeoutMs: 50 });
+  const entry = hung.stores['rami-levy'];
+  assert.deepEqual([entry.state, entry.loggedIn, entry.howToRenew], ['unknown', null, undefined]);
+  assert.match(entry.detail, /timed out/);
+  assert.equal(entry.token.expiresAt, null);
+  assert.match(hung.warnings[0], /could not be checked.*not a login failure/);
+  assert.deepEqual(monitor.warnings(), []);
 });

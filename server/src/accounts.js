@@ -77,10 +77,11 @@ export class AccountMonitor {
     return notes;
   }
 
-  /** Live check through each store's read-only status tool. */
+  /** Live check through each store's read-only status tool; each store's state is ok, rejected or unknown. */
   async status(stores, { timeoutMs = 25_000 } = {}) {
     const checks = { shufersal: 'status', 'rami-levy': 'rami_levy_check_status' };
     const result = {};
+    const unknown = [];
     await Promise.all(
       stores.map(async (store) => {
         const tool = checks[store.id];
@@ -90,17 +91,19 @@ export class AccountMonitor {
           const response = await withTimeout(store.callTool(tool, {}), timeoutMs, `${store.label} status check timed out`);
           const body = parse(response);
           const ok = !response.isError && (store.id === 'shufersal' ? body?.signedIn === true : body?.ok === true);
-          Object.assign(entry, { loggedIn: ok, detail: body ?? text(response).slice(0, 300) });
+          Object.assign(entry, { state: ok ? 'ok' : 'rejected', loggedIn: ok, detail: body ?? text(response).slice(0, 300) });
           this.observe(store.id, ok, ok ? '' : `not signed in: ${text(response).slice(0, 150)}`);
         } catch (error) {
-          Object.assign(entry, { loggedIn: false, detail: error.message });
-          this.observe(store.id, false, `log in check failed: ${error.message}`);
+          // A probe that times out or cannot reach the adapter says nothing about the login,
+          // so it is reported as unknown and never remembered as a login failure.
+          Object.assign(entry, { state: 'unknown', loggedIn: null, detail: error.message });
+          unknown.push(`${store.label} login could not be checked (${error.message}); this is not a login failure, try again shortly.`);
         }
         if (store.id === 'rami-levy') entry.token = this.ramiExpiry() ?? { expiresAt: null, note: 'the token carries no readable expiry' };
-        if (!entry.loggedIn) entry.howToRenew = RENEW[store.id];
+        if (entry.state === 'rejected') entry.howToRenew = RENEW[store.id];
         result[store.id] = entry;
       }),
     );
-    return { stores: result, warnings: this.warnings(), checkedAt: new Date(this.now()).toISOString() };
+    return { stores: result, warnings: [...this.warnings(), ...unknown], checkedAt: new Date(this.now()).toISOString() };
   }
 }

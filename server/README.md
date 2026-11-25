@@ -164,7 +164,7 @@ Images get the commit, build time and upstream commits as build arguments from t
 
 ### `account_status` and login warnings
 
-`account_status` checks each store's login live, using Shufersal's `status` and Rami Levy's `check_status`. It reports `loggedIn` per store and when the Rami Levy token expires (`expiresAt`, `daysLeft`). For a failed login it also returns `howToRenew`.
+`account_status` checks each store's login live, using Shufersal's `status` and Rami Levy's `check_status`. It reports a `state` per store: `ok`, `rejected` when the store refused the login, or `unknown` when the check timed out or the adapter could not be reached. `loggedIn` is `true`, `false` or `null` to match. It also reports when the Rami Levy token expires (`expiresAt`, `daysLeft`). Only a `rejected` login returns `howToRenew`. An `unknown` check adds a warning to that response only, and is not remembered as a login failure.
 
 The server also keeps track of login health between calls:
 
@@ -318,7 +318,7 @@ The tests use stand-in adapters from `test/fixtures/`, so they need no credentia
 - `normalize.test.js` covers size, price, barcode and promotion parsing, both stores' result shapes, weighed items, error reporting, sorting and barcode grouping. The cases come from live search results.
 - `http.test.js` runs the server in HTTP mode with stdin closed. It also checks catalog search against a local stand-in for the catalog API, including the store and User-Agent sent and the barcode pairing. It covers listing tools and annotations, search, two clients sharing one store process, 404, 405, 400 and a foreign `Host` header, and read-only mode.
 - `shufersal-search.test.js` covers cookie matching (domain, path, expiry, secure), the direct search against a local stand-in, raw result mapping, promotion parsing, Rami Levy branch stock, and falling back to the adapter.
-- `accounts.test.js` covers token expiry, warning thresholds, which errors count as login failures, and live status checks for healthy, logged-out, failing and hung stores. `http.test.js` also runs `account_status` and the warnings end to end, and runs the bridge with a stdio client, including exit on disconnect and an unreachable server.
+- `accounts.test.js` covers token expiry, warning thresholds, which errors count as login failures, and live status checks for healthy, logged-out, failing and hung stores, where a hung or failing probe reports `unknown` and leaves no lasting warning. `http.test.js` also runs `account_status` and the warnings end to end, and runs the bridge with a stdio client, including exit on disconnect and an unreachable server.
 - `preferences.test.js` and `order.test.js` cover preference storage, validation and resolution into baskets, and both stores' cart paths, including failures, refused products and dry runs.
 - `basket.test.js` covers the cache (TTL, stale fallback, merged loads), the concurrency limiter, match selection, promotion pricing, basket totals and a failing store.
 - `http-server.test.js` and `rami-catalog.test.js` test the HTTP listener and the catalog client in process, including error paths such as challenge pages, HTTP errors, refused connections and timeouts.
