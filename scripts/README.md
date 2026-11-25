@@ -17,6 +17,8 @@ python3 -m unittest discover -s scripts/tests -v
 
 ## `set_rami_levy_tokens.py`
 
+On a server with the account page (`GROCERY_ACCOUNT_HTTP`), paste the same **Copy as cURL** there instead. The login is then kept encrypted in the database and takes priority over `.env`.
+
 Rami Levy has no password login for the server. It uses the session headers of a logged-in browser instead. This script takes them from one copied request, so you never paste tokens by hand.
 
 ### Use

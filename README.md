@@ -58,6 +58,16 @@ echo "GROCERY_MASTER_KEY='$(node -e "console.log('1:' + require('crypto').random
 
 Back the key up somewhere safe: without it, the encrypted values cannot be read. See [server/README.md](server/README.md#database) for the tables and the encryption.
 
+## Account page
+
+Set `GROCERY_ACCOUNT_HTTP` to the server's tailnet address and a port, such as `100.x.y.z:8795`, to get a page for your profile, delivery address and store logins. A Rami Levy login pasted there replaces the token script. See [server/README.md](server/README.md#account-page). From a computer that is not on the tailnet, use an SSH tunnel:
+
+```sh
+ssh -N -L 8795:<tailnet address>:8795 <server>
+```
+
+Then open `http://localhost:8795/account`.
+
 ## Credentials
 
 Docker Compose reads `.env` from the repository root, and git ignores it. Wrap each value in single quotes. Compose then keeps characters such as `$`, `!`, `#` and spaces exactly as written. A value itself cannot contain a single quote.

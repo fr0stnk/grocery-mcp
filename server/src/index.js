@@ -10,6 +10,9 @@ import { databaseFile, openDatabase } from './db/database.js';
 import { recordAudit } from './db/people.js';
 import { DbPreferenceStore } from './db/preferences.js';
 import { createVault } from './db/vault.js';
+import { loadSession } from './db/sessions.js';
+import { tokenExpiry } from './accounts.js';
+import { startAccountServer } from './web/account.js';
 import { PriceHistory, startTracker } from './history.js';
 import { recordSearchesWith, searchStore } from './search.js';
 import { parseListen, startHttpServer } from './http.js';
@@ -17,6 +20,15 @@ import { withTimeout } from './stores.js';
 import { BUILD, FULL_VERSION } from './version.js';
 
 const STARTUP_TIMEOUT_MS = 40_000;
+/** How a saved store session becomes that adapter's environment. */
+const SESSION_ENV = {
+  'rami-levy': (s) => ({
+    RAMI_LEVY_BEARER_TOKEN: s.bearerToken,
+    RAMI_LEVY_ECOM_TOKEN: s.ecomToken,
+    RAMI_LEVY_USER_AGENT: s.userAgent,
+    ...(s.cookie ? { RAMI_LEVY_COOKIE: s.cookie } : {}),
+  }),
+};
 const log = (message) => process.stderr.write(`[grocery] ${message}\n`);
 
 const readOnly = /^(1|true|yes)$/i.test(process.env.GROCERY_READ_ONLY ?? '');
@@ -41,6 +53,33 @@ try {
     recordAudit(db, { userId: owner.id, storeAccountId: accountOf.get(store) ?? null, tool, outcome, durationMs, details });
   const vault = createVault();
   log(`database ${file}: ${accounts.length} store accounts${vault.available ? `, master key v${vault.keyVersion}` : ', no master key yet (GROCERY_MASTER_KEY)'}`);
+
+  // A store login saved on the account page replaces the one from .env for that
+  // store's adapter. Adapters read their environment when they start, so a
+  // change closes the adapter and the next call starts it with the new login.
+  const applySession = (storeId) => {
+    const store = stores.find((s) => s.id === storeId);
+    const account = accounts.find((a) => a.store === storeId);
+    if (!store || !account || !vault.available || !SESSION_ENV[storeId]) return false;
+    const session = loadSession(db, vault, account.id);
+    store.env = { ...process.env, ...(session ? SESSION_ENV[storeId](session) : {}) };
+    if (storeId === 'rami-levy') monitor.ramiTokenExpiry = tokenExpiry(store.env.RAMI_LEVY_ECOM_TOKEN);
+    return Boolean(session);
+  };
+  for (const s of stores) if (applySession(s.id)) log(`${s.id}: using the login saved on the account page`);
+
+  if (process.env.GROCERY_ACCOUNT_HTTP && httpListen) {
+    const { host, port } = parseListen(process.env.GROCERY_ACCOUNT_HTTP);
+    await startAccountServer({
+      host, port, db, vault, ownerId: owner.id, log,
+      extraHosts: (process.env.GROCERY_ACCOUNT_HOSTS ?? '').split(','),
+      onSessionChange: (storeId) => {
+        applySession(storeId);
+        void stores.find((s) => s.id === storeId)?.close();
+        log(`${storeId}: login changed on the account page; the adapter restarts on its next call`);
+      },
+    });
+  }
 } catch (error) {
   log(`database unavailable, using the preferences and price files: ${error.message}`);
 }

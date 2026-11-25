@@ -54,6 +54,8 @@ services:
       - GROCERY_IMAGE_TAG=${GROCERY_IMAGE_TAG:-latest}
       - GROCERY_READ_ONLY
       - GROCERY_HTTP=127.0.0.1:8791
+      - GROCERY_ACCOUNT_HTTP
+      - GROCERY_ACCOUNT_HOSTS
     volumes:
       - rami-data:/data/rami-levy
       - shufersal-data:/data/shufersal
