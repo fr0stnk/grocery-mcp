@@ -67,6 +67,22 @@ test('Shufersal sends only checked items, in one bulk call', async () => {
   assert.equal(down.results[0].code, 'STORE_UNAVAILABLE');
 });
 
+test('Shufersal raises a product already in the cart instead of reporting it added unchanged', async () => {
+  const cache = new SearchCache();
+  await seed(cache, 'shufersal', 'חלב', [product('shufersal', 'P_4131074'), product('shufersal', 'P_7290102398065'), product('shufersal', 'P_5')]);
+  const cart = { P_4131074: 1, P_7290102398065: 29, P_5: 2 };
+  const store = fakeStore('shufersal', { respond: (tool, args) => {
+    if (tool === 'add_to_cart') return text({ lines: args.items.map((i) => ({ code: i.code, status: 'already-in-cart', cartQuantity: cart[i.code] })) });
+    if (args.code !== 'P_5') cart[args.code] = args.quantity;
+    return text({ products: Object.entries(cart).map(([code, quantity]) => ({ code, quantity })) });
+  } });
+  const out = await addBasketToCart([store], { store: 'shufersal', items: [{ productId: 'P_4131074', quantity: 2 }, { productId: 'P_7290102398065', quantity: 2 }, { productId: 'P_5' }] }, { cache });
+
+  assert.deepEqual(store.calls.slice(1), [['set_quantity', { code: 'P_4131074', quantity: 3 }], ['set_quantity', { code: 'P_5', quantity: 3 }]], 'over the limit is never sent');
+  assert.deepEqual(out.results.map((r) => [r.status, r.code, r.cartQuantity]), [['added', undefined, 3], ['rejected', 'INVALID_QUANTITY', 29], ['rejected', 'STORE_REJECTED', 2]]);
+  assert.deepEqual([out.added, out.complete], [1, false]);
+});
+
 test('Rami Levy adds every checked product in one call, with the server\'s own name and price', async () => {
   const cache = new SearchCache();
   await seed(cache, 'rami-levy', 'חלב', [

@@ -119,7 +119,7 @@ This tool adds several products to **one** store's real cart in a single call, u
   - `INVALID_QUANTITY` for a fractional quantity of an item sold by unit,
   - `MISSING_OFFER_DETAILS` for a Rami Levy product the server has not seen and no name or price was given.
 - Every result line has a `status` (`added`, `would-add` or `rejected`). The summary counts `requested`, `accepted`, `rejected` and `added`, and `complete` is true only when every line went through.
-- **Shufersal:** only the checked items go to the adapter's bulk `add_to_cart`, in one call. The adapter's per-line outcome is reported back.
+- **Shufersal:** only the checked items go to the adapter's bulk `add_to_cart`, in one call. The adapter's per-line outcome is reported back. The adapter leaves a product that is already in the cart unchanged, so the server then raises it with `set_quantity` to the existing quantity plus the requested one, and confirms the new quantity in the returned cart (`cartQuantity`). A total above Shufersal's 30-unit limit is rejected as `INVALID_QUANTITY` and nothing is changed.
 - **Rami Levy:** the name and price come from the server's own search results, not from the request (`priceSource: "server"`). A request price that differs is reported as `priceChanged`. Products the server has not seen use the request's values and are marked `priceSource: "client"`. Then one `rami_levy_add_items` call adds every checked product with a single cart sync, and quantities are added to what is already there. Products Rami Levy refuses come back as `STORE_REJECTED`, while the rest stay added. A failed sync changes nothing and returns `STORE_ERROR`. The result includes Rami Levy's own `serverTotal`.
 - Nothing is ordered or paid. Checkout happens in the store's app or site.
 

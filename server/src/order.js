@@ -2,6 +2,7 @@ import { StoreError } from './normalize.js';
 import { searchCache, searchStore } from './search.js';
 
 const MAX_ITEMS = 60;
+const SHUFERSAL_MAX_QUANTITY = 30;
 
 export const ADD_BASKET_TOOL = {
   name: 'add_basket_to_cart',
@@ -105,6 +106,24 @@ async function checkRamiLevy(store, it, cache) {
   return { ...it, priceBasis: basis, priceSource: 'client' };
 }
 
+/** Raises a product already in the Shufersal cart by the requested quantity, then checks the cart. */
+async function topUpShufersal(store, c, inCart, describe) {
+  const target = inCart + c.quantity;
+  if (!Number.isFinite(inCart)) return { ...describe(c, 'rejected'), code: 'STORE_REJECTED', message: 'already in the cart, with a quantity Shufersal did not report' };
+  if (target > SHUFERSAL_MAX_QUANTITY) {
+    return { ...describe(c, 'rejected'), code: 'INVALID_QUANTITY', message: `${inCart} already in the cart; ${target} would exceed Shufersal's limit of ${SHUFERSAL_MAX_QUANTITY}`, cartQuantity: inCart };
+  }
+  try {
+    const result = await store.callTool('set_quantity', { code: c.productId.toUpperCase(), quantity: target });
+    const body = parseText(result);
+    const now = Array.isArray(body?.products) ? body.products.find((p) => String(p.code).toUpperCase() === c.productId.toUpperCase())?.quantity : undefined;
+    if (!result.isError && now === target) return { ...describe(c, 'added'), cartQuantity: target };
+    return { ...describe(c, 'rejected'), code: 'STORE_REJECTED', message: `could not raise the quantity from ${inCart} to ${target}`, cartQuantity: now ?? inCart };
+  } catch (error) {
+    return { ...describe(c, 'rejected'), code: 'STORE_ERROR', message: error.message, cartQuantity: inCart };
+  }
+}
+
 function summary(store, dryRun, results) {
   const count = (status) => results.filter((r) => r.status === status).length;
   return {
@@ -138,12 +157,18 @@ export async function addBasketToCart(stores, args = {}, { cache = searchCache }
     const body = parseText(result);
     if (result.isError) throw new StoreError(`Shufersal: ${String(typeof body === 'string' ? body : JSON.stringify(body)).slice(0, 500)}`, 'STORE_ERROR');
     const lines = Array.isArray(body?.lines) ? body.lines : [];
-    const out = checked.map((c) => {
-      if (c.status === 'rejected') return c;
+    const out = [];
+    for (const c of checked) {
+      if (c.status === 'rejected') {
+        out.push(c);
+        continue;
+      }
       const line = lines.find((l) => String(l.code ?? l.input ?? '').toUpperCase() === c.productId.toUpperCase());
-      const ok = !line || /^(added|would-add|already-in-cart)$/.test(line.status ?? 'added');
-      return ok ? describe(c, 'added') : { ...describe(c, 'rejected'), code: 'STORE_REJECTED', message: line.status };
-    });
+      // The adapter leaves a product already in the cart untouched; this tool adds to it.
+      if (line?.status === 'already-in-cart') out.push(await topUpShufersal(store, c, Number(line.cartQuantity), describe));
+      else if (!line || /^(added|would-add)$/.test(line.status ?? 'added')) out.push({ ...describe(c, 'added'), ...(line?.cartQuantity != null ? { cartQuantity: line.cartQuantity } : {}) });
+      else out.push({ ...describe(c, 'rejected'), code: 'STORE_REJECTED', message: line.status });
+    }
     return { ...summary(store.id, false, out), storeSummary: body?.summary };
   }
 
