@@ -2,9 +2,6 @@ import { StoreError } from './normalize.js';
 import { searchCache, searchStore } from './search.js';
 
 const MAX_ITEMS = 60;
-// The OpenAI tunnel ends a request after 120 s; stop starting new Rami Levy
-// adds before that and report the rest as not added.
-const RAMI_BUDGET_MS = 90_000;
 
 export const ADD_BASKET_TOOL = {
   name: 'add_basket_to_cart',
@@ -122,7 +119,7 @@ function summary(store, dryRun, results) {
   };
 }
 
-export async function addBasketToCart(stores, args = {}, { now = () => Date.now(), cache = searchCache } = {}) {
+export async function addBasketToCart(stores, args = {}, { cache = searchCache } = {}) {
   const items = parseRequest(args);
   const store = stores.find((s) => s.id === args.store);
   if (!store) throw new StoreError(`${args.store} is not configured on this server`, 'STORE_UNAVAILABLE');
@@ -150,26 +147,17 @@ export async function addBasketToCart(stores, args = {}, { now = () => Date.now(
     return { ...summary(store.id, false, out), storeSummary: body?.summary };
   }
 
-  // Rami Levy adds one product per call, and each call syncs the whole cart.
-  const started = now();
-  const out = [];
-  for (const c of checked) {
-    if (c.status === 'rejected') {
-      out.push(c);
-      continue;
-    }
-    if (now() - started > RAMI_BUDGET_MS) {
-      out.push({ ...describe(c, 'rejected'), code: 'TIME_BUDGET', message: 'not attempted: time budget reached; add the rest in a second call' });
-      continue;
-    }
-    try {
-      const result = await store.callTool('rami_levy_add_item', { productId: c.productId, name: c.name, price: c.price, qty: c.quantity });
-      const body = parseText(result);
-      if (!result.isError && body?.ok !== false) out.push(describe(c, 'added'));
-      else out.push({ ...describe(c, 'rejected'), code: 'STORE_REJECTED', message: typeof body === 'string' ? body.slice(0, 300) : JSON.stringify(body?.error ?? body).slice(0, 300) });
-    } catch (error) {
-      out.push({ ...describe(c, 'rejected'), code: 'STORE_ERROR', message: error.message });
-    }
+  // Rami Levy adds the whole checked list with one cart sync.
+  const result = await store.callTool('rami_levy_add_items', { items: valid.map((c) => ({ productId: c.productId, name: c.name, price: c.price, qty: c.quantity })) });
+  const body = parseText(result);
+  const refused = new Set(body?.reason === 'items_rejected' && Array.isArray(body.rejected) ? body.rejected.map((r) => String(r.productId)) : []);
+  if (result.isError || (body?.ok !== true && !refused.size)) {
+    const reason = typeof body === 'string' ? body : [body?.reason, body?.details ?? body?.message].filter(Boolean).join(': ');
+    throw new StoreError(`Rami Levy: ${String(reason || JSON.stringify(body)).slice(0, 500)}`, 'STORE_ERROR', { retryable: body?.reason === 'network_error' });
   }
-  return summary(store.id, false, out);
+  const out = checked.map((c) => {
+    if (c.status === 'rejected') return c;
+    return refused.has(c.productId) ? { ...describe(c, 'rejected'), code: 'STORE_REJECTED', message: 'Rami Levy refused this product' } : describe(c, 'added');
+  });
+  return { ...summary(store.id, false, out), ...(body?.resetAfterOrder ? { resetAfterOrder: body.resetAfterOrder } : {}), serverTotal: body?.serverTotal ?? null };
 }

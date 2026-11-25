@@ -67,14 +67,14 @@ test('Shufersal sends only checked items, in one bulk call', async () => {
   assert.equal(down.results[0].code, 'STORE_UNAVAILABLE');
 });
 
-test('Rami Levy uses the server\'s own name and price and reports a changed price', async () => {
+test('Rami Levy adds every checked product in one call, with the server\'s own name and price', async () => {
   const cache = new SearchCache();
   await seed(cache, 'rami-levy', 'חלב', [
     product('rami-levy', '329258', { name: 'חלב 3% טרה 2 ליטר', price: 14.9 }),
     product('rami-levy', '1', { name: 'עגבניות', price: 30.6, priceBasis: 'kg' }),
     product('rami-levy', '2', { inStock: false }),
   ]);
-  const store = fakeStore('rami-levy', { respond: (tool, args) => (args.productId === '1' ? { isError: true, ...text('unknown product') } : text({ ok: true })) });
+  const store = fakeStore('rami-levy', { respond: () => text({ ok: false, reason: 'items_rejected', rejected: [{ productId: '1', name: 'עגבניות' }], serverTotal: 34.8 }) });
   const out = await addBasketToCart([store], { store: 'rami-levy', items: [
     { productId: '329258', name: 'wrong name', price: 12, quantity: 2 },
     { productId: '1', quantity: 0.5 },
@@ -84,21 +84,26 @@ test('Rami Levy uses the server\'s own name and price and reports a changed pric
     { productId: '888' },
   ] }, { cache });
 
-  assert.deepEqual(store.calls[0], ['rami_levy_add_item', { productId: '329258', name: 'חלב 3% טרה 2 ליטר', price: 14.9, qty: 2 }]);
+  assert.deepEqual(store.calls, [['rami_levy_add_items', { items: [
+    { productId: '329258', name: 'חלב 3% טרה 2 ליטר', price: 14.9, qty: 2 },
+    { productId: '1', name: 'עגבניות', price: 30.6, qty: 0.5 },
+    { productId: '777', name: 'from the client', price: 5, qty: 1 },
+  ] }]]);
   assert.deepEqual(out.results[0].priceChanged, { requested: 12, current: 14.9 });
   assert.deepEqual(out.results.map((r) => r.status === 'rejected' ? r.code : `${r.status}:${r.priceSource}`), [
     'added:server', 'STORE_REJECTED', 'OUT_OF_STOCK', 'INVALID_QUANTITY', 'added:client', 'MISSING_OFFER_DETAILS',
   ]);
-  assert.deepEqual([out.requested, out.added, out.rejected, out.complete], [6, 2, 4, false]);
+  assert.deepEqual([out.requested, out.added, out.rejected, out.complete, out.serverTotal], [6, 2, 4, false, 34.8]);
 });
 
-test('Rami Levy stops starting adds when the time budget runs out, and dry runs change nothing', async () => {
-  let clock = 0;
-  const store = fakeStore('rami-levy', { respond: () => { clock += 60_000; return text({ ok: true }); } });
+test('Rami Levy reports a failed sync as a store error, and dry runs change nothing', async () => {
   const items = [1, 2, 3].map((n) => ({ productId: String(n), name: `item ${n}`, price: 1 }));
-  const out = await addBasketToCart([store], { store: 'rami-levy', items }, { now: () => clock, cache: new SearchCache() });
-  assert.equal(store.calls.length, 2);
-  assert.deepEqual([out.added, out.rejected, out.results[2].code], [2, 1, 'TIME_BUDGET']);
+  const expired = fakeStore('rami-levy', { respond: () => text({ ok: false, reason: 'auth_expired', status: 401 }) });
+  await assert.rejects(addBasketToCart([expired], { store: 'rami-levy', items }, { cache: new SearchCache() }), (e) => e.code === 'STORE_ERROR' && /auth_expired/.test(e.message) && !e.retryable);
+
+  const fine = fakeStore('rami-levy', { respond: () => text({ ok: true, serverTotal: 3, resetAfterOrder: { orderId: 5 } }) });
+  const done = await addBasketToCart([fine], { store: 'rami-levy', items }, { cache: new SearchCache() });
+  assert.deepEqual([fine.calls.length, done.added, done.complete, done.resetAfterOrder.orderId], [1, 3, true, 5]);
 
   const preview = fakeStore('rami-levy');
   const dry = await addBasketToCart([preview], { store: 'rami-levy', items, dry_run: true }, { cache: new SearchCache() });

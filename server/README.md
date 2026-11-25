@@ -120,7 +120,7 @@ This tool adds several products to **one** store's real cart in a single call, u
   - `MISSING_OFFER_DETAILS` for a Rami Levy product the server has not seen and no name or price was given.
 - Every result line has a `status` (`added`, `would-add` or `rejected`). The summary counts `requested`, `accepted`, `rejected` and `added`, and `complete` is true only when every line went through.
 - **Shufersal:** only the checked items go to the adapter's bulk `add_to_cart`, in one call. The adapter's per-line outcome is reported back.
-- **Rami Levy:** the name and price come from the server's own search results, not from the request (`priceSource: "server"`). A request price that differs is reported as `priceChanged`. Products the server has not seen use the request's values and are marked `priceSource: "client"`. Then one `rami_levy_add_item` runs per product. Each call syncs the whole cart, and quantities are added to what is already there. The tool reports each item's result. After 90 seconds it stops starting new adds and reports the rest as not attempted, which keeps it inside the OpenAI tunnel's 120-second limit.
+- **Rami Levy:** the name and price come from the server's own search results, not from the request (`priceSource: "server"`). A request price that differs is reported as `priceChanged`. Products the server has not seen use the request's values and are marked `priceSource: "client"`. Then one `rami_levy_add_items` call adds every checked product with a single cart sync, and quantities are added to what is already there. Products Rami Levy refuses come back as `STORE_REJECTED`, while the rest stay added. A failed sync changes nothing and returns `STORE_ERROR`. The result includes Rami Levy's own `serverTotal`.
 - Nothing is ordered or paid. Checkout happens in the store's app or site.
 
 ### `server_info` and version reporting
@@ -295,7 +295,7 @@ The tests use stand-in adapters from `test/fixtures/`, so they need no credentia
 - `http.test.js` runs the server in HTTP mode with stdin closed. It also checks catalog search against a local stand-in for the catalog API, including the store and User-Agent sent and the barcode pairing. It covers listing tools and annotations, search, two clients sharing one store process, 404, 405, 400 and a foreign `Host` header, and read-only mode.
 - `shufersal-search.test.js` covers cookie matching (domain, path, expiry, secure), the direct search against a local stand-in, raw result mapping, promotion parsing, Rami Levy branch stock, and falling back to the adapter.
 - `accounts.test.js` covers token expiry, warning thresholds, which errors count as login failures, and live status checks for healthy, logged-out, failing and hung stores. `http.test.js` also runs `account_status` and the warnings end to end, and runs the bridge with a stdio client, including exit on disconnect and an unreachable server.
-- `preferences.test.js` and `order.test.js` cover preference storage, validation and resolution into baskets, and both stores' cart paths, including failures, the time budget and dry runs.
+- `preferences.test.js` and `order.test.js` cover preference storage, validation and resolution into baskets, and both stores' cart paths, including failures, refused products and dry runs.
 - `basket.test.js` covers the cache (TTL, stale fallback, merged loads), the concurrency limiter, match selection, promotion pricing, basket totals and a failing store.
 - `http-server.test.js` and `rami-catalog.test.js` test the HTTP listener and the catalog client in process, including error paths such as challenge pages, HTTP errors, refused connections and timeouts.
 - `server.test.js` starts real child processes. It covers startup failure messages, restart after an adapter exits, partial results when one store fails or hangs, tool forwarding and prefixes, instruction pass-through, and exit when stdin closes.
@@ -313,7 +313,7 @@ The tests use stand-in adapters from `test/fixtures/`, so they need no credentia
 | `src/basket.js` | `compare_basket`: match selection, promotion pricing and totals |
 | `src/accounts.js` | `account_status`, Rami Levy token expiry and remembered login failures |
 | `src/bridge.js` | stdio-to-HTTP relay for clients such as Claude Desktop |
-| `src/order.js` | `add_basket_to_cart`: Shufersal bulk add, Rami Levy per-item adds with a time budget |
+| `src/order.js` | `add_basket_to_cart`: one bulk add per store |
 | `src/preferences.js` | Household preference store and its three tools |
 | `src/version.js` | Version from `package.json`, and build info: commit, build date, image tag and upstream commits |
 | `src/cache.js` | Search cache with stale fallback, and the per-store concurrency limiter |
