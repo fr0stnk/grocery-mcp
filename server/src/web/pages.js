@@ -13,7 +13,7 @@ const STATUS = {
 
 const field = (name, label, value, { type = 'text', required = false, autocomplete = 'off', wide = false, dir } = {}) => `
   <label class="field${wide ? ' wide' : ''}"><span>${esc(label)}${required ? '' : ' <em>optional</em>'}</span>
-    <input id="${name}" name="${name}" type="${type}" value="${esc(value)}"${required ? ' required' : ''} autocomplete="${autocomplete}"${dir ? ` dir="${dir}"` : ''}></label>`;
+    <input id="${name}" name="${name}" type="${type}" value="${esc(value)}"${required ? ' required' : ''} autocomplete="${autocomplete}" dir="${dir ?? 'auto'}"></label>`;
 
 const form = (action, csrf, body, button) => `
   <form method="post" action="/account/${action}">

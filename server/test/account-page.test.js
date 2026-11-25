@@ -80,6 +80,8 @@ test('the account page saves forms with CSRF tokens, refuses others, and connect
     assert.match(html, /Profile saved/);
     assert.match(html, /&lt;b&gt;Dana&lt;\/b&gt;/, 'values are escaped');
     assert.match(saved.headers.get('content-security-policy'), /default-src 'none'/);
+    assert.equal(saved.headers.get('referrer-policy'), 'same-origin', 'so browsers send the real Origin on the page\'s own forms');
+    assert.equal((await post('profile', { csrf: token('profile'), firstName: 'X' }, { origin: base })).status, 200, 'a same-origin form, as Chrome sends it');
     assert.equal(saved.headers.get('cache-control'), 'no-store');
 
     const bad = await post('connect-rami-levy', { csrf: token('connect-rami-levy'), curl: 'fetch(...)' });

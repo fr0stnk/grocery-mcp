@@ -91,7 +91,8 @@ export function accountHandler({ db, vault, ownerId, hostAllow, onSessionChange 
         'content-type': type,
         'cache-control': 'no-store',
         'x-content-type-options': 'nosniff',
-        'referrer-policy': 'no-referrer',
+        // no-referrer makes Chrome send `Origin: null` on the page's own forms, which the origin check refuses.
+        'referrer-policy': 'same-origin',
         'x-frame-options': 'DENY',
         'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
       });
