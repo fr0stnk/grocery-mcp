@@ -48,6 +48,16 @@ docker compose run --rm -T grocery
 
 The named volumes preserve the Rami Levy basket, the Shufersal session and product choices, and the household preferences between runs. The combined server and the single-store services share the same volumes.
 
+## Database and master key
+
+The server keeps people, store accounts, preferences, prices and an audit log in SQLite (`grocery.db` in the `grocery-data` volume). Store sessions, phone numbers and addresses are encrypted with a master key that lives only in `.env` on the server:
+
+```sh
+echo "GROCERY_MASTER_KEY='$(node -e "console.log('1:' + require('crypto').randomBytes(32).toString('base64'))")'" >> .env
+```
+
+Back the key up somewhere safe: without it, the encrypted values cannot be read. See [server/README.md](server/README.md#database) for the tables and the encryption.
+
 ## Credentials
 
 Docker Compose reads `.env` from the repository root, and git ignores it. Wrap each value in single quotes. Compose then keeps characters such as `$`, `!`, `#` and spaces exactly as written. A value itself cannot contain a single quote.

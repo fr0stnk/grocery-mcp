@@ -117,7 +117,14 @@ function withAccountWarnings(name, result, monitor) {
   return warnings.length ? { ...result, accountWarnings: warnings } : result;
 }
 
-export function createGroceryServer(stores, { readOnly = false, log = () => {}, preferences = null, monitor = new AccountMonitor(), history = null } = {}) {
+export function createGroceryServer(stores, { readOnly = false, log = () => {}, preferences = null, monitor = new AccountMonitor(), history = null, audit = () => {} } = {}) {
+  const record = (entry) => {
+    try {
+      audit(entry);
+    } catch (error) {
+      log(`audit not recorded: ${error.message}`);
+    }
+  };
   const server = new Server(
     { name: 'grocery-mcp', version: FULL_VERSION },
     { capabilities: { tools: { listChanged: true } }, instructions: buildInstructions(stores, { readOnly }) },
@@ -138,15 +145,18 @@ export function createGroceryServer(stores, { readOnly = false, log = () => {}, 
     const { name, arguments: args = {} } = request.params;
     const own = ownTools(stores, preferences, monitor, { readOnly, history }).get(name);
     if (own) {
+      const started = Date.now();
       try {
-        const started = Date.now();
         const result = withAccountWarnings(name, await own.run(args), monitor);
-        log(`call ${name} ${describeCall(name, args, result)} in ${Date.now() - started} ms`);
+        const summary = describeCall(name, args, result);
+        log(`call ${name} ${summary} in ${Date.now() - started} ms`);
+        record({ tool: name, store: typeof args.store === 'string' ? args.store : null, outcome: 'ok', durationMs: Date.now() - started, details: summary });
         void refreshMissingTools();
         return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
       } catch (error) {
         // Errors of our own tools carry a stable code the client can act on.
         const body = { error: { code: error.code ?? 'INTERNAL_ERROR', message: error.message, retryable: Boolean(error.retryable) } };
+        record({ tool: name, store: typeof args.store === 'string' ? args.store : null, outcome: body.error.code, durationMs: Date.now() - started });
         return { isError: true, content: [{ type: 'text', text: JSON.stringify(body) }] };
       }
     }
@@ -157,14 +167,18 @@ export function createGroceryServer(stores, { readOnly = false, log = () => {}, 
       const text = hidden ? `${name} changes data and this server is read-only.` : `Unknown tool: ${name}`;
       return { isError: true, content: [{ type: 'text', text }] };
     }
+    const started = Date.now();
     try {
       log(`call ${name}`);
       const result = await route.store.callTool(route.tool.name, args, FORWARD_TIMEOUT_MS);
       const body = (result.content ?? []).filter((c) => c.type === 'text').map((c) => c.text).join('\n');
-      if (result.isError || /"ok"\s*:\s*false/.test(body)) monitor.observe(route.store.id, false, body);
+      const failed = result.isError || /"ok"\s*:\s*false/.test(body);
+      if (failed) monitor.observe(route.store.id, false, body);
+      record({ tool: name, store: route.store.id, outcome: failed ? 'STORE_ERROR' : 'ok', durationMs: Date.now() - started });
       return result;
     } catch (error) {
       monitor.observe(route.store.id, false, error.message);
+      record({ tool: name, store: route.store.id, outcome: 'STORE_ERROR', durationMs: Date.now() - started });
       return { isError: true, content: [{ type: 'text', text: `${route.store.label}: ${error.message}` }] };
     }
   });

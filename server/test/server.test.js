@@ -13,6 +13,7 @@ import { normalizeRamiLevy } from '../src/normalize.js';
 
 // Spawned servers must not write price history into the repository.
 process.env.GROCERY_HISTORY_FILE ??= path.join(mkdtempSync(path.join(tmpdir(), 'grocery-history-')), 'history.db');
+process.env.GROCERY_DATABASE_FILE ??= path.join(mkdtempSync(path.join(tmpdir(), 'grocery-db-')), 'grocery.db');
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const FAKE = path.join(here, 'fixtures/fake-store.js');

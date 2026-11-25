@@ -130,7 +130,7 @@ For each store's product the tool returns the daily `series` and `current` price
 - `usualPrice`, the median before the latest day, and `vsUsual`, today's price minus it. A promotion with `vsUsual` at 0 or above is not a real discount;
 - `isLowestSeen` and `change30Days`.
 
-Prices are recorded in `price-history.db` (SQLite) under `GROCERY_DATA_DIR`: one row per store, product and day, kept for 400 days. Every fresh search result is recorded, from any tool and any client. The HTTP server also searches every saved preference once a day, so the products the household buys build a history without anyone searching for them. A product that was never searched has no history yet.
+Prices are recorded in the `prices` table of the database: one row per store, product and day, kept for 400 days. Every fresh search result is recorded, from any tool and any client. The HTTP server also searches every saved preference once a day, so the products the household buys build a history without anyone searching for them. A product that was never searched has no history yet.
 
 ### `add_basket_to_cart`
 
@@ -196,7 +196,7 @@ MCP cannot message a user outside a conversation. For a daily check, a client's 
 - `barcode` pins an exact product, and is preferred over `query`: searching a store by barcode returns exactly that product.
 - `quantity` is the default amount, and `usual` puts the item in the usual basket.
 - `compare_basket` accepts `{ "preference": "milk" }` items, and `usual: true` adds every preference marked usual.
-- The preferences live in `preferences.json` under `GROCERY_DATA_DIR`. In Docker that is the `grocery-data` volume at `/data/grocery`; locally it is `<repo>/.data`. The file is re-read on every call and replaced atomically with mode 0600, so the stdio and HTTP servers share it safely.
+- The preferences live in the database, per person (see Database). A `preferences.json` from older versions is imported on the first start. If the database is unavailable, the server falls back to that file.
 - In read-only mode `save_preference`, `remove_preference` and `add_basket_to_cart` are hidden and refused.
 
 ### Search cache
@@ -236,6 +236,17 @@ ssh -T <server> 'docker exec -i grocery-mcp-grocery-http-1 node src/bridge.js'
 ```
 
 The bridge connects to `GROCERY_BRIDGE_URL` (default `http://127.0.0.1:8791/mcp`), which is the server inside the same container. When the server cannot be reached, each request gets a JSON-RPC error instead of hanging. The bridge exits when the client closes stdin.
+
+## Database
+
+The server keeps its state in SQLite, `grocery.db` under `GROCERY_DATA_DIR` (the `grocery-data` volume in Docker), opened in WAL mode so the HTTP server and one-shot stdio runs can share it. `src/db/` holds:
+
+- `migrations.js`: numbered, append-only migrations, applied in order at start. The SQL avoids SQLite-only features (TEXT ids and timestamps, encrypted values as TEXT), so the database can move to PostgreSQL later with a new driver and a data copy.
+- the tables: `users`, `store_accounts` (one Shufersal or Rami Levy login, owned by the person who connected it), `store_access` (who may use which store account, as `owner`, `shopper` or `viewer`), `addresses`, `preferences` (per person), `carts` and `cart_syncs` (per store account, with idempotency keys), `audit_log` and `prices`;
+- `vault.js`: envelope encryption for secrets and personal data. Each value gets its own random AES-256-GCM key, wrapped by the master key `GROCERY_MASTER_KEY`, which lives only in the server's environment. The row and field are bound as associated data, so a value copied elsewhere does not open. Retired keys in `GROCERY_MASTER_KEYS_OLD` keep old values readable after a rotation.
+- `bootstrap.js`: run at every start, it adds what is missing. Until sign-in arrives there is one person, the owner, with a store account for each configured store whose login still comes from the environment (`status: environment`). Older `preferences.json` and `price-history.db` files are imported once and renamed with `.imported`.
+
+Every tool call is written to `audit_log`: the tool, the store account, the outcome code, the duration and a short summary, never secrets or addresses. Entries are kept for 400 days. If the database cannot be opened, the server logs why and keeps working from the older preference and price files.
 
 ## Errors
 
@@ -291,7 +302,11 @@ The adapters read their own variables, listed in the root `.env.example`. The se
 | `GROCERY_RAMI_LEVY_CATALOG_URL` | Rami Levy's catalog API | Catalog endpoint override, used by the tests |
 | `GROCERY_DATA_DIR` | `<repo>/.data` locally, `/data/grocery` in Docker | Where `preferences.json` and `price-history.db` are kept |
 | `GROCERY_PREFERENCES_FILE` | `$GROCERY_DATA_DIR/preferences.json` | Exact preferences file, used by the tests |
-| `GROCERY_HISTORY_FILE` | `$GROCERY_DATA_DIR/price-history.db` | Exact price history database, used by the tests |
+| `GROCERY_DATABASE_FILE` | `$GROCERY_DATA_DIR/grocery.db` | Exact database file, used by the tests |
+| `GROCERY_MASTER_KEY` | unset | Master key for encrypted values, `1:<32 bytes base64>`; keep it only in the server's environment |
+| `GROCERY_MASTER_KEYS_OLD` | unset | Retired master keys, comma-separated, still used to open older values |
+| `GROCERY_OWNER_EMAIL` | unset | Email recorded on the owner, the first person in the database |
+| `GROCERY_HISTORY_FILE` | `$GROCERY_DATA_DIR/price-history.db` | Price history file, used only when the database is unavailable, and by the tests |
 | `GROCERY_PRICE_HISTORY` | on | `off` stops recording prices and hides `price_history` |
 | `GROCERY_HTTP` | unset, which means stdio | Serve Streamable HTTP on `port` or `host:port`. The host defaults to `127.0.0.1`. |
 | `GROCERY_READ_ONLY` | off | When `1`, only tools annotated `readOnlyHint` are listed, and other forwarded tools are refused. `search_all_stores` always works. |
@@ -350,6 +365,7 @@ The tests use stand-in adapters from `test/fixtures/`, so they need no credentia
 | `src/bridge.js` | stdio-to-HTTP relay for clients such as Claude Desktop |
 | `src/order.js` | `add_basket_to_cart`: one bulk add per store |
 | `src/preferences.js` | Household preference store and its three tools |
+| `src/db/` | Database: migrations, encryption vault, people and store accounts, preferences, audit log, and the import of older files |
 | `src/history.js` | Price history: SQLite recording, `price_history` and the daily preference tracker |
 | `src/version.js` | Version from `package.json`, and build info: commit, build date, image tag and upstream commits |
 | `src/cache.js` | Search cache with stale fallback, and the per-store concurrency limiter |

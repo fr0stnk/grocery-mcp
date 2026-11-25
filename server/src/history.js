@@ -20,19 +20,29 @@ export function dayOf(ms) {
 /**
  * One row per store, product and day: the last price seen that day. Every
  * fresh search result is recorded, so history grows with use; the daily
- * tracker adds the household's saved preferences. Several processes (the HTTP
- * server and one-shot stdio runs) may share the file, which WAL mode allows.
+ * tracker adds saved preferences. It lives in the server's database (pass
+ * `db`) or, for tests and older setups, in its own file. Several processes may
+ * share the file, which WAL mode allows.
  */
 export class PriceHistory {
   #db = null;
+  #pruned = false;
 
-  constructor(file = historyFile(), { now = () => Date.now() } = {}) {
+  constructor(file = historyFile(), { now = () => Date.now(), db = null } = {}) {
     this.file = file;
     this.now = now;
+    this.#db = db;
+    this.ownsDb = !db;
   }
 
   async #open() {
-    if (this.#db) return this.#db;
+    if (this.#db) {
+      if (!this.#pruned) {
+        this.#db.prepare('DELETE FROM prices WHERE day < ?').run(dayOf(this.now() - KEEP_DAYS * DAY_MS));
+        this.#pruned = true;
+      }
+      return this.#db;
+    }
     const { DatabaseSync } = await import('node:sqlite');
     fs.mkdirSync(path.dirname(this.file), { recursive: true, mode: 0o700 });
     const db = new DatabaseSync(this.file);
@@ -46,6 +56,7 @@ export class PriceHistory {
     db.exec('CREATE INDEX IF NOT EXISTS prices_barcode ON prices (barcode, day)');
     db.prepare('DELETE FROM prices WHERE day < ?').run(dayOf(this.now() - KEEP_DAYS * DAY_MS));
     this.#db = db;
+    this.#pruned = true;
     return db;
   }
 
@@ -90,7 +101,7 @@ export class PriceHistory {
   }
 
   close() {
-    this.#db?.close();
+    if (this.ownsDb) this.#db?.close();
     this.#db = null;
   }
 }

@@ -42,6 +42,9 @@ services:
       - SHUFERSAL_USERNAME
       - SHUFERSAL_PASSWORD
       - GROCERY_STORES
+      - GROCERY_MASTER_KEY
+      - GROCERY_MASTER_KEYS_OLD
+      - GROCERY_OWNER_EMAIL
       - GROCERY_IMAGE_TAG=${GROCERY_IMAGE_TAG:-latest}
     volumes:
       - rami-data:/data/rami-levy

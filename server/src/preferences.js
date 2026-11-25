@@ -20,8 +20,42 @@ function text(value, field, max) {
   return value.trim();
 }
 
+export function preferenceName(input) {
+  const name = text(input?.name, 'name', 60);
+  if (!name) throw new StoreError('name is required', 'INVALID_ARGUMENT');
+  return name;
+}
+
+/** Validates a save request against the saved preference, if any. `count` is how many the person has. */
+export function buildPreference(input = {}, existing = {}, count = 0) {
+  const name = preferenceName(input);
+  if (!existing.name && count >= MAX_PREFERENCES) throw new StoreError(`at most ${MAX_PREFERENCES} preferences`, 'INVALID_ARGUMENT');
+  let barcode = existing.barcode;
+  if (input.barcode !== undefined) {
+    barcode = input.barcode === null || input.barcode === '' ? undefined : barcodeOf(input.barcode);
+    if (input.barcode && !barcode) throw new StoreError(`${input.barcode} is not a retail barcode`, 'INVALID_ARGUMENT');
+  }
+  const query = input.query !== undefined ? text(input.query, 'query', 100) : existing.query;
+  if (!query && !barcode) throw new StoreError('give a Hebrew search query, a barcode, or both', 'INVALID_ARGUMENT');
+  const quantity = input.quantity !== undefined ? Number(input.quantity) : existing.quantity ?? 1;
+  if (!(quantity > 0 && quantity <= 100)) throw new StoreError('quantity must be above 0 and at most 100', 'INVALID_ARGUMENT');
+  const note = input.note !== undefined ? text(input.note, 'note', 200) : existing.note;
+  return {
+    name: existing.name ?? name,
+    ...(query ? { query } : {}),
+    ...(barcode ? { barcode } : {}),
+    quantity,
+    usual: input.usual !== undefined ? Boolean(input.usual) : Boolean(existing.usual),
+    ...(note ? { note } : {}),
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+export { keyOf as preferenceKey };
+
 /**
- * Household product preferences, shared by every client of this server.
+ * Household product preferences in a JSON file: the store before the
+ * database (plan phase 1), still used for imports and by tests.
  * The file is re-read on each call, so the stdio and HTTP servers see each
  * other's changes, and it is replaced atomically on every write.
  */
@@ -58,32 +92,10 @@ export class PreferenceStore {
 
   /** Creates or updates one preference; omitted fields keep their saved values. */
   save(input = {}) {
-    const name = text(input.name, 'name', 60);
-    if (!name) throw new StoreError('name is required', 'INVALID_ARGUMENT');
     const data = this.#read();
+    const name = preferenceName(input);
     const existing = data.items[keyOf(name)] ?? {};
-    if (!existing.name && Object.keys(data.items).length >= MAX_PREFERENCES) throw new StoreError(`at most ${MAX_PREFERENCES} preferences`, 'INVALID_ARGUMENT');
-
-    let barcode = existing.barcode;
-    if (input.barcode !== undefined) {
-      barcode = input.barcode === null || input.barcode === '' ? undefined : barcodeOf(input.barcode);
-      if (input.barcode && !barcode) throw new StoreError(`${input.barcode} is not a retail barcode`, 'INVALID_ARGUMENT');
-    }
-    const query = input.query !== undefined ? text(input.query, 'query', 100) : existing.query;
-    if (!query && !barcode) throw new StoreError('give a Hebrew search query, a barcode, or both', 'INVALID_ARGUMENT');
-    const quantity = input.quantity !== undefined ? Number(input.quantity) : existing.quantity ?? 1;
-    if (!(quantity > 0 && quantity <= 100)) throw new StoreError('quantity must be above 0 and at most 100', 'INVALID_ARGUMENT');
-    const note = input.note !== undefined ? text(input.note, 'note', 200) : existing.note;
-
-    const preference = {
-      name: existing.name ?? name,
-      ...(query ? { query } : {}),
-      ...(barcode ? { barcode } : {}),
-      quantity,
-      usual: input.usual !== undefined ? Boolean(input.usual) : Boolean(existing.usual),
-      ...(note ? { note } : {}),
-      updatedAt: new Date().toISOString(),
-    };
+    const preference = buildPreference(input, existing, Object.keys(data.items).length);
     data.items[keyOf(name)] = preference;
     this.#write(data);
     return { saved: preference, created: !existing.name };

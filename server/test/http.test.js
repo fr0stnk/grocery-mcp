@@ -24,6 +24,7 @@ async function startHttp(extraEnv = {}) {
       GROCERY_HTTP: '127.0.0.1:0',
       GROCERY_PREFERENCES_FILE: path.join(mkdtempSync(path.join(tmpdir(), 'grocery-prefs-')), 'preferences.json'),
       GROCERY_HISTORY_FILE: path.join(mkdtempSync(path.join(tmpdir(), 'grocery-history-')), 'history.db'),
+      GROCERY_DATABASE_FILE: path.join(mkdtempSync(path.join(tmpdir(), 'grocery-db-')), 'grocery.db'),
       GROCERY_RAMI_LEVY_SEARCH: 'adapter',
       GROCERY_SHUFERSAL_ENTRY: fixture('fake-shufersal.js'),
       GROCERY_RAMI_LEVY_ENTRY: fixture('fake-rami-levy.js'),
