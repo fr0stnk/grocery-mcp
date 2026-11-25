@@ -192,3 +192,37 @@ test('GROC-008: a flavoured bread loses to plain bread, and is flagged when it i
   assert.deepEqual(bestCandidates([breads[0]], 'לחם')[0].unrequested, ['עגבניות']);
   assert.equal(bestCandidates([{ name: 'עגבניות ארוזות' }], 'עגבניות')[0].unrequested, undefined, 'a flavour the query asks for is not a variant');
 });
+
+// Live search results for the everyday-basket review, 2026-11-26.
+const catalog2 = JSON.parse(readFileSync(new URL('./fixtures/catalog-2026-11-26.json', import.meta.url), 'utf8'));
+const one2 = async (query, quantity = 1) => {
+  const s = (id) => ({ id, label: id, search: { maxLimit: 20, run: async ({ query: q }) => catalog2[q]?.[id] ?? [] } });
+  return (await compareBasket([s('shufersal'), s('rami-levy')], { items: [{ query, quantity }] }, { cache: new SearchCache() })).items[0];
+};
+
+test('GROC-018: a construct-state query matches the staple, and derived products are variants', async () => {
+  for (const name of names(await one2('תפוחי אדמה'))) assert.match(name, /^תפוח אדמה/, 'potatoes, not potato pastries or burekas');
+  assert.doesNotMatch((await one2('חומוס')).offers.shufersal.name, /מוקפא/);
+  const pickles = await one2('מלפפונים');
+  assert.ok(pickles.offers['rami-levy'].unrequested?.length, 'pickles in brine are flagged');
+  assert.ok((await one2('לחם זיתים')).offers['rami-levy'].unrequested, 'breadcrumbs are flagged');
+  assert.deepEqual((await one2('פחמים')).offers.shufersal.unrequested, ['מדליק'], 'lighter fluid is flagged');
+  assert.equal((await one2('מטרנה')).identical, true, 'formula in both stores, not a fruit pouch');
+});
+
+test('GROC-019: offers at prices more than 3× apart are not like for like', async () => {
+  const line = await one2('מנקה חלונות');
+  assert.match(line.notEquivalent, /^price .*× the other store's/);
+  assert.equal(line.cheapestStore, null);
+});
+
+test('GROC-020: "מידה 4" is a size that must match, not a count of four', async () => {
+  assert.deepEqual(constraintsOf('חיתולים מידה 4'), { stage: 'מידה 4' });
+  const line = await one2('חיתולים מידה 4');
+  for (const name of names(line)) assert.match(name, /מידה 4(?!\+)/);
+});
+
+test('GROC-021: sliced bread and product lines named "בייבי" are not variants', async () => {
+  assert.equal((await one2('לחם פרוס')).identical, true);
+  assert.equal(bestCandidates([{ name: 'חיתולים בייבי סופרים מידה 4' }], 'חיתולים')[0].unrequested, undefined);
+});

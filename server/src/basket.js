@@ -74,6 +74,8 @@ function usable(list) {
 
 const GRADE = /^(xs|s|m|l|xl|xxl)$/i;
 const PERCENT = /(\d+(?:[.,]\d+)?)\s*%/u;
+// A diaper size or formula stage: "מידה 4", "מידה 4+", "שלב 2".
+const STAGE = /(מידה|שלב)\s*(\d+\+?)/u;
 // How far down each store's list a product sold in every store may be to win.
 const SHARED_TOP = 3;
 
@@ -85,15 +87,18 @@ const SHARED_TOP = 3;
 export function constraintsOf(query) {
   const text = String(query ?? '');
   const size = parseSize(text);
-  const withoutSize = size ? text.replace(/(\d+(?:[.,]\d+)?)\s*\S+/u, ' ') : text;
+  // "מידה 4" (diaper size) and "שלב 2" (formula stage) are grades of the product, not counts.
+  const withoutSize = (size ? text.replace(/(\d+(?:[.,]\d+)?)\s*\S+/u, ' ') : text).replace(/(?:מידה|שלב)\s*\d+\+?/gu, ' ');
   const countMatch = /(?:^|\s)(\d{1,3})(?:\s*(?:יחידות|יח'?))?(?=$|\s)/u.exec(withoutSize);
   const grade = text.split(/\s+/).find((w) => GRADE.test(w));
   const percent = PERCENT.exec(text);
+  const stage = STAGE.exec(text);
   return {
     ...(size ? { size } : {}),
     ...(countMatch && !size ? { count: Number(countMatch[1]) } : {}),
     ...(grade ? { grade: grade.toUpperCase() } : {}),
     ...(percent ? { percent: Number(percent[1].replace(',', '.')) } : {}),
+    ...(stage ? { stage: `${stage[1]} ${stage[2]}` } : {}),
   };
 }
 
@@ -145,6 +150,12 @@ export function fitOf(product, constraints, { strict = [] } = {}) {
     if (!grades.length) unknown = true;
     else if (!grades.includes(constraints.grade)) return `grade ${grades.join('/')}, not ${constraints.grade}`;
   }
+  if (constraints.stage) {
+    const [word] = constraints.stage.split(' ');
+    const found = [...String(product.name ?? '').matchAll(new RegExp(STAGE, 'gu'))].filter((m) => m[1] === word).map((m) => `${m[1]} ${m[2]}`);
+    if (!found.length) unknown = true;
+    else if (!found.includes(constraints.stage)) return `${found.join('/')}, not ${constraints.stage}`;
+  }
   if (constraints.percent != null) {
     const stated = STATED.percent(product);
     if (!stated && strict.includes('percent')) return `no percentage stated, not ${constraints.percent}%`;
@@ -179,7 +190,7 @@ function fitting(list, constraints) {
 export function pickMatches(listsByStore, { barcode, constraints = {}, query = '', preferKg = false } = {}) {
   const ids = Object.keys(listsByStore);
   const kgFirst = (list) => (preferKg && list.some((x) => x.priceBasis === 'kg') ? list.filter((x) => x.priceBasis === 'kg') : list);
-  const narrow = (list) => kgFirst(bestCandidates(fitting(usable(list), constraints).list, query));
+  const narrow = (list) => kgFirst(withoutOutliers(bestCandidates(fitting(usable(list), constraints).list, query)));
   const lists = Object.fromEntries(ids.map((id) => [id, barcode ? usable(listsByStore[id] ?? []) : narrow(listsByStore[id] ?? [])]));
   if (barcode) {
     const matches = Object.fromEntries(ids.map((id) => [id, lists[id].find((x) => x.barcode === barcode) ?? null]));
@@ -219,6 +230,18 @@ export function lineCost(match, quantity) {
 
 const FRACTIONAL = 'INCOMPATIBLE_QUANTITY_BASIS';
 
+/**
+ * Drops candidates priced more than PRICE_RATIO times the median of a store's
+ * best candidates: the ₪295 window-cleaning robot among ₪11 sprays.
+ */
+function withoutOutliers(list) {
+  const prices = list.map((x) => x.price).filter((p) => p > 0).sort((a, b) => a - b);
+  if (prices.length < 3) return list;
+  const median = prices[Math.floor(prices.length / 2)];
+  const kept = list.filter((x) => !(x.price > median * PRICE_RATIO));
+  return kept.length ? kept : list;
+}
+
 /** Whole packs for a weight in kg: the nearest number of packs, half rounding up, and at least one. */
 export function packsFor(quantity, packWeightKg) {
   return Math.max(1, Math.round(quantity / packWeightKg));
@@ -250,6 +273,7 @@ function offer(match, quantity) {
 }
 
 const isPriced = (o) => Boolean(o && !o.excluded);
+const PRICE_RATIO = 3;
 
 /**
  * Whether different products are still like for like: 'match', or why not
@@ -262,6 +286,15 @@ function equivalenceOf(offers) {
   const variant = offers.find((o) => o.unrequested);
   if (variant) return `${variant.name} is a variant that was not asked for (${variant.unrequested.join(', ')})`;
   if (offers.length < 2) return 'match';
+  const reason = sizeDifference(offers);
+  if (reason !== 'match') return reason;
+  // Matching names at prices this far apart are different kinds of product (a ₪295 window-cleaning robot vs a ₪25 spray).
+  const [low, high] = offers.map((o) => o.lineTotal).sort((x, y) => x - y);
+  if (low > 0 && high / low > PRICE_RATIO) return `price ${Math.round((high / low) * 10) / 10}× the other store's, likely a different product`;
+  return 'match';
+}
+
+function sizeDifference(offers) {
   const [a, b] = offers;
   const basis = (o) => o.priceBasis ?? 'unit';
   if (basis(a) !== basis(b)) return `${basis(a)} vs ${basis(b)}`;

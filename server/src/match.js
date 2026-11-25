@@ -25,10 +25,12 @@ const HEBREW_PREFIX = /^[והבלמשכ](?=[֐-׿]{3})/u;
  */
 const VARIANT_WORDS = new Set([
   'זירו', 'דיאט', 'דייט', 'לייט', 'לימון', 'בטעם', 'טעם', 'תות', 'וניל', 'שוקו', 'שוקולד', 'אפרסק', 'מנגו', 'קפה',
-  'אומגה', 'אורגני', 'אורגנית', 'מלא', 'מלאה', 'חום', 'מופחת', 'מופחתת', 'דל', 'דלת', 'ללא',
-  'קפוא', 'קפואה', 'קפואים', 'קפואות', 'מעושן', 'מעושנת', 'מתובל', 'מתובלת', 'טחון', 'טחונה', 'פרוס', 'פרוסה',
-  'מיובש', 'מיובשים', 'קלוי', 'קלויים', 'מרוסקות', 'מרוסק', 'חתוכות', 'רסק', 'שרי', 'בייבי', 'מיני',
-  'ממרח', 'רוטב', 'קמח', 'מיץ', 'נקטר', 'תרכיז', 'פירורי', 'עוגיות', 'קרקרים', 'צ\'יפס', 'חטיף',
+  'אומגה', 'אורגני', 'אורגנית', 'מלא', 'מלאה', 'חום', 'מופחת', 'מופחתת', 'דל', 'דלת',
+  'קפוא', 'קפואה', 'קפואים', 'קפואות', 'מוקפא', 'מוקפאת', 'מוקפאים', 'מוקפאות', 'מעושן', 'מעושנת', 'מתובל', 'מתובלת', 'טחון', 'טחונה',
+  'מיובש', 'מיובשים', 'קלוי', 'קלויים', 'מרוסקות', 'מרוסק', 'חתוכות', 'רסק', 'שרי', 'מיני', 'מלח',
+  'ממרח', 'רוטב', 'קמח', 'מיץ', 'נקטר', 'תרכיז', 'משקה', 'פירורי', 'פרורי', 'מרק', 'מחית', 'פסטלים', 'בורקס', 'מילוי',
+  // Other kinds of product named after what they are used with: lighter fluid for "פחמים", a robot for "מנקה חלונות".
+  'מדליק', 'מנגל', 'גריל', 'כיסוי', 'נטען', 'חשמלי', 'מכשיר', 'רובוט', 'תמצית', 'קורנישונים', 'מסבחה', 'יפס', 'עוגיות', 'קרקרים', 'צ\'יפס', 'חטיף',
   'חומץ', 'חמוץ', 'חמוצים', 'כבוש', 'כבושים', 'קוביות', 'מיובשות', 'פולפה', 'משומר', 'משומרות', 'שימורים',
   'סושי', 'ריזוטו', 'סטיקי',
   // Added flavours, which turn a plain product into a variant: "לחם מחמצת עגבניות" is tomato bread.
@@ -58,6 +60,14 @@ export function stemOf(word) {
 
 const bareOf = (w) => w.replace(HEBREW_PREFIX, '');
 
+/** A plural in construct state without its ending: תפוחי (אדמה) → תפוח, חיתולי → חיתול, so "תפוח אדמה" matches "תפוחי אדמה". */
+function constructOf(word) {
+  return /^[\u0590-\u05FF]{4,}י$/u.test(word) ? word.slice(0, -1) : null;
+}
+
+// Query words that make a variant word part of the request: plant milks are sold as "משקה" (a drink).
+const IMPLIES = { חלב: ['משקה'] };
+
 /**
  * The words of a query that say what the product is, each with the forms it
  * may take in a product name. Numbers, sizes, units and grades are left out.
@@ -68,7 +78,7 @@ export function queryTerms(query) {
     .map((w) => {
       const bare = bareOf(w);
       // A leading ב/ה/ו may be a prefix ("בחלב") or part of the word ("בננות"), so both readings count.
-      return { word: w, forms: [...new Set([w, bare, stemOf(w), stemOf(bare)].filter(Boolean))] };
+      return { word: w, forms: [...new Set([w, bare, stemOf(w), stemOf(bare), constructOf(w), constructOf(bare)].filter(Boolean))] };
     });
 }
 
@@ -102,7 +112,7 @@ export function matchedTerms(item, terms) {
 export function scoreOf(item, terms, query) {
   const words = wordsOf(item.name ?? '').filter((w) => !isPackaging(w));
   const queryWords = wordsOf(query);
-  const asked = new Set([...queryWords, ...queryWords.map(bareOf)]);
+  const asked = new Set([...queryWords, ...queryWords.map(bareOf), ...queryWords.flatMap((w) => IMPLIES[bareOf(w)] ?? [])]);
   const head = terms.length > 0 && words.slice(0, 2).some((w) => wordMatches(terms[0], w));
   const unrequested = words.filter((w) => inSet(VARIANT_WORDS, w) && !asked.has(w) && !asked.has(bareOf(w)));
   const asksForPack = queryWords.some((w) => inSet(MULTIPACK_WORDS, w)) || MULTIPACK_RE.test(String(query));
