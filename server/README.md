@@ -95,7 +95,7 @@ Each offer's `lineTotal` is price × quantity. A fractional quantity means kilog
 The result contains:
 
 - `items`: each item's chosen offers per store, with `cheapestStore`.
-- `totals`: each store's total, the number of items found and the `missing` queries.
+- `totals`: each store's total, the number of items found and the `missing` queries. Shufersal offers for products sold by weight or package carry `addable: false` and are listed in `addInApp`: they are priced, but `add_basket_to_cart` cannot add them, so the user adds them in the Shufersal app. Choosing a store should take that into account.
 - `comparable`: totals over only the items every store has **like for like**, with `cheaperStore` and `difference`. This is the fair comparison. An item whose products differ in pack size (`0.5 kg vs 1 kg`), count (`18 vs 12 units`) or how they are sold (`kg vs unit`) is marked `notEquivalent` and listed in `comparable.leftOut` with the reason. It still counts in each store's own total. Sizes that cannot be read on both sides are not treated as different.
 - `split`: the total when every item is bought where it is cheapest, and `savingsOnCommonItems` against the cheapest single store.
 - `notes`: delivery fees and minimum orders are excluded, weighed quantities are in kilograms, and some prices may be stale.
