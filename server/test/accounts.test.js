@@ -53,6 +53,9 @@ test('status checks each store live and explains how to renew', async () => {
 
   assert.deepEqual([out.stores.shufersal.state, out.stores['rami-levy'].state], ['ok', 'rejected']);
 
+  const onPage = new AccountMonitor({ env: { GROCERY_ACCOUNT_HTTP: '127.0.0.1:8795' }, now: () => NOW });
+  assert.match((await onPage.status(stores)).stores['rami-levy'].howToRenew, /account page \(\/account\)/, 'with the account page, renewal happens there');
+
   const broken = await monitorWith(null).status([{ id: 'shufersal', label: 'Shufersal', callTool: async () => { throw new Error('Shufersal failed to start'); } }]);
   assert.deepEqual([broken.stores.shufersal.state, broken.stores.shufersal.loggedIn, broken.stores.shufersal.detail], ['unknown', null, 'Shufersal failed to start']);
 });

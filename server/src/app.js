@@ -45,7 +45,7 @@ export function forwardedTools(stores, { readOnly }) {
         listed: {
           ...tool,
           name: store.exposedName(tool.name),
-          description: `[${store.label}] ${tool.description ?? ''}`.trim(),
+          description: `[${store.label}] ${store.descriptions?.[tool.name] ?? tool.description ?? ''}`.trim(),
           ...(Object.keys(annotations).length ? { annotations } : {}),
         },
       });

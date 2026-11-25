@@ -4,6 +4,12 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 // Errors that mean a store login is missing or expired, as worded by the adapters and the stores.
 const AUTH_ERROR = /auth_expired|not signed in|sign(ed)? ?in|log ?in|unauthori[sz]ed|\b401\b|\b403\b/i;
 
+/** Where to renew when the account page is enabled: logins are kept there, not in .env. */
+const RENEW_ON_PAGE = {
+  shufersal: 'Ask the owner to connect Shufersal again on the server\'s account page (/account): they log in there with the password, which is used once and not stored.',
+  'rami-levy': 'Ask the owner to reconnect Rami Levy on the server\'s account page (/account) by pasting a new "Copy as cURL" from a logged-in browser. Search keeps working meanwhile; carts and orders need the login.',
+};
+
 const RENEW = {
   shufersal:
     'The server signs in again with the saved Shufersal password by itself. If it keeps failing, Shufersal may be asking for a captcha or SMS code: sign in once through the adapter\'s browser login or import a session, as described in the README.',
@@ -50,7 +56,7 @@ function parse(result) {
  */
 export class AccountMonitor {
   constructor({ env = process.env, now = () => Date.now(), warnDays = 7 } = {}) {
-    Object.assign(this, { now, warnDays });
+    Object.assign(this, { now, warnDays, accountPage: Boolean(env.GROCERY_ACCOUNT_HTTP) });
     this.ramiTokenExpiry = tokenExpiry(env.RAMI_LEVY_ECOM_TOKEN);
     this.failures = new Map();
   }
@@ -100,7 +106,7 @@ export class AccountMonitor {
           unknown.push(`${store.label} login could not be checked (${error.message}); this is not a login failure, try again shortly.`);
         }
         if (store.id === 'rami-levy') entry.token = this.ramiExpiry() ?? { expiresAt: null, note: 'the token carries no readable expiry' };
-        if (entry.state === 'rejected') entry.howToRenew = RENEW[store.id];
+        if (entry.state === 'rejected') entry.howToRenew = (this.accountPage ? RENEW_ON_PAGE : RENEW)[store.id];
         result[store.id] = entry;
       }),
     );

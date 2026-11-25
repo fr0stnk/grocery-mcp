@@ -114,6 +114,15 @@ try {
   for (const s of stores) if (applySession(s.id)) log(`${s.id}: using the login saved on the account page`);
 
   if (process.env.GROCERY_ACCOUNT_HTTP && httpListen) {
+    // Logins are managed on the account page, so the adapter's own description of its login tool would mislead.
+    const shufersalStore = stores.find((s) => s.id === 'shufersal');
+    if (shufersalStore) {
+      shufersalStore.descriptions = {
+        login:
+          'Re-checks the Shufersal session that the owner connected on the server\'s account page. It cannot log in with a password or open a browser. ' +
+          'If Shufersal is not signed in or the login was rejected, ask the owner to connect Shufersal again on the account page (/account).',
+      };
+    }
     const { host, port } = parseListen(process.env.GROCERY_ACCOUNT_HTTP);
     await startAccountServer({
       host, port, db, vault, ownerId: owner.id, log,

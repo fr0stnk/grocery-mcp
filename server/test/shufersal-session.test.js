@@ -23,4 +23,7 @@ test('host-only adapter tools are never forwarded to clients', () => {
   const store = { id: 'shufersal', label: 'Shufersal', tools: [{ name: 'login_with_password', annotations: {} }, { name: 'status', annotations: { readOnlyHint: true } }], exposedName: (n) => `shufersal_${n}` };
   assert.ok(HOST_ONLY_TOOLS.has('login_with_password'));
   assert.deepEqual([...forwardedTools([store], { readOnly: false }).keys()], ['shufersal_status']);
+  store.tools.push({ name: 'login', description: 'Logs in with the stored password.' });
+  store.descriptions = { login: 'Re-checks the session; reconnect on the account page.' };
+  assert.equal(forwardedTools([store], { readOnly: false }).get('shufersal_login').listed.description, '[Shufersal] Re-checks the session; reconnect on the account page.');
 });
