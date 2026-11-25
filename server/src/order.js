@@ -210,8 +210,8 @@ export async function addBasketToCart(stores, args = {}, { cache = searchCache, 
         continue;
       }
       const line = lines.find((l) => String(l.code ?? l.input ?? '').toUpperCase() === c.productId.toUpperCase());
-      // The adapter leaves a product already in the cart untouched; this tool adds to it (units only: Shufersal changes weights in its app).
-      if (line?.status === 'already-in-cart' && c.sellingMethod !== 'BY_UNIT') out.push({ ...describe(c, 'rejected'), code: 'ALREADY_IN_CART', message: `${c.name} is already in the cart; change its ${c.sellingMethod === 'BY_WEIGHT' ? 'weight' : 'packs'} in the Shufersal app`, cartQuantity: line.cartQuantity });
+      // The adapter leaves a product already in the cart untouched; this tool adds to it (units and packs: Shufersal changes weights in its app).
+      if (line?.status === 'already-in-cart' && c.sellingMethod === 'BY_WEIGHT') out.push({ ...describe(c, 'rejected'), code: 'ALREADY_IN_CART', message: `${c.name} is already in the cart; change its weight in the Shufersal app`, cartQuantity: line.cartQuantity });
       else if (line?.status === 'already-in-cart') out.push(await topUpShufersal(store, c, Number(line.cartQuantity), describe));
       else if (!line || /^(added|would-add)$/.test(line.status ?? 'added')) out.push({ ...describe(c, 'added'), ...(line?.cartQuantity != null ? { cartQuantity: line.cartQuantity } : {}) });
       else out.push({ ...describe(c, 'rejected'), code: 'STORE_REJECTED', message: line.status });

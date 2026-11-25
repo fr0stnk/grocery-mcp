@@ -182,3 +182,20 @@ test('Shufersal packaged produce: a kg amount is refused with the number of pack
   assert.deepEqual([out.results[1].status, out.results[1].packWeightKg, out.results[1].pricePerKg, out.results[1].estimatedTotal, out.results[1].priceEstimated], ['would-add', 1, 8.9, 26.7, true]);
 });
 
+
+test('GROC-017: a Shufersal pack already in the cart is raised by whole packs; a weighed product is refused', async () => {
+  const cache = new SearchCache();
+  await seed(cache, 'shufersal', 'עגבניה', [
+    product('shufersal', 'P_7296073440314', { name: 'עגבניה טרייה ארוזה', price: 8.9, priceBasis: 'kg', sellingMethod: 'BY_PACKAGE', packWeightKg: 1, packPrice: 8.9 }),
+    product('shufersal', 'P_964775', { name: 'בננה', price: 7.9, priceBasis: 'kg', sellingMethod: 'BY_WEIGHT' }),
+  ]);
+  const cart = { P_7296073440314: 2, P_964775: 1.5 };
+  const store = fakeStore('shufersal', { respond: (tool, args) => {
+    if (tool === 'add_to_cart') return text({ lines: args.items.map((i) => ({ code: i.code, status: 'already-in-cart', cartQuantity: cart[i.code] })) });
+    cart[args.code] = args.quantity;
+    return text({ products: Object.entries(cart).map(([code, quantity]) => ({ code, quantity })) });
+  } });
+  const out = await addBasketToCart([store], { store: 'shufersal', items: [{ productId: 'P_7296073440314', quantity: 1 }, { productId: 'P_964775', quantity: 1 }] }, { cache });
+  assert.deepEqual(store.calls.slice(1), [['set_quantity', { code: 'P_7296073440314', quantity: 3 }]]);
+  assert.deepEqual(out.results.map((r) => [r.status, r.code, r.cartQuantity]), [['added', undefined, 3], ['rejected', 'ALREADY_IN_CART', 1.5]]);
+});

@@ -147,7 +147,7 @@ This tool adds several products to **one** store's real cart in a single call, u
 - **The server checks every product before anything is added, and a dry run uses exactly the same checks.** Each product is looked up in fresh search results (up to 15 minutes old), or else with a live search by its code. Rejected items get a stable code:
   - `PRODUCT_NOT_FOUND` for an unknown product,
   - `OUT_OF_STOCK`, including Rami Levy items not sold at the branch,
-  - `ALREADY_IN_CART` for a Shufersal weighed or packaged product already in the cart, whose amount is changed in Shufersal's app,
+  - `ALREADY_IN_CART` for a Shufersal product sold by weight already in the cart, whose weight is changed in Shufersal's app. Units and packs already in the cart are raised by the requested amount instead,
   - `UNSUPPORTED_PRODUCT_ID` for anything that is not a Shufersal code; variant codes such as `P_7296073409441_42` are accepted,
   - `INVALID_QUANTITY` for a fractional quantity of an item sold by unit or pack, or a Shufersal weight that is not in 0.5 kg steps. Products sold by weight take their quantity in kilograms in both stores,
   - `PRODUCT_NOT_VERIFIED` for a Rami Levy product that cannot be found again. A product outside the 15-minute search cache is re-checked live: by the barcode it had when this server last saw it (from the price history, up to two days back), otherwise by that name or the given `name`. Rami Levy's catalog cannot be searched by product id, and a caller's name and price are never trusted on their own.
