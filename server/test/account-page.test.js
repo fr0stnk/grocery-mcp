@@ -32,13 +32,15 @@ test('profile and address are stored with the phone and the address line encrypt
   saveProfile(db, vault, owner.id, { firstName: 'Dana', lastName: 'Levi', email: 'dana@example.com', phone: '050-123-4567' });
   assert.deepEqual(getProfile(db, vault, owner.id), { firstName: 'Dana', lastName: 'Levi', email: 'dana@example.com', phone: '+972501234567' });
   assert.equal(db.prepare('SELECT phone_enc FROM users WHERE id = ?').get(owner.id).phone_enc.includes('972'), false);
-  assert.throws(() => saveProfile(db, vault, owner.id, { email: 'nope' }), /email address/);
+  assert.throws(() => saveProfile(db, vault, owner.id, { firstName: 'Dana', lastName: 'Levi', email: 'nope', phone: '0501234567' }), /email address/);
+  assert.throws(() => saveProfile(db, vault, owner.id, { firstName: 'Dana', email: 'dana@example.com' }), /last name, phone are required/);
   assert.equal(getAddress(db, vault, owner.id), null);
   const first = saveAddress(db, vault, owner.id, { city: 'תל אביב', street: 'הרצל', houseNumber: '12', apartment: '4', notes: 'Code 1234' });
+  assert.throws(() => saveAddress(db, vault, owner.id, { city: 'חיפה', street: 'הנמל', houseNumber: '3' }), /apartment are required/);
   assert.deepEqual({ ...first, id: undefined }, { id: undefined, city: 'תל אביב', street: 'הרצל', houseNumber: '12', apartment: '4', floor: null, entrance: null, notes: 'Code 1234' });
   const row = db.prepare('SELECT * FROM addresses').get();
   assert.equal(row.address_enc.includes('1234'), false, 'the house number and notes are encrypted');
-  assert.equal(saveAddress(db, vault, owner.id, { city: 'חיפה', street: 'הנמל', houseNumber: '3' }).id, first.id, 'one default address, updated in place');
+  assert.equal(saveAddress(db, vault, owner.id, { city: 'חיפה', street: 'הנמל', houseNumber: '3', apartment: '1' }).id, first.id, 'one default address, updated in place');
   assert.throws(() => saveAddress(db, vault, owner.id, { city: 'חיפה' }), /required/);
   db.close();
 });
@@ -74,14 +76,14 @@ test('the account page saves forms with CSRF tokens, refuses others, and connect
     });
     assert.equal(tunnelled, 200, 'an SSH tunnel arrives as localhost on its own port');
 
-    const saved = await post('profile', { csrf: token('profile'), firstName: '<b>Dana</b>', phone: '0501234567' });
+    const saved = await post('profile', { csrf: token('profile'), firstName: '<b>Dana</b>', lastName: 'Levi', email: 'dana@example.com', phone: '0501234567' });
     assert.equal(saved.status, 200);
     const html = await saved.text();
     assert.match(html, /Profile saved/);
     assert.match(html, /&lt;b&gt;Dana&lt;\/b&gt;/, 'values are escaped');
     assert.match(saved.headers.get('content-security-policy'), /default-src 'none'/);
     assert.equal(saved.headers.get('referrer-policy'), 'same-origin', 'so browsers send the real Origin on the page\'s own forms');
-    assert.equal((await post('profile', { csrf: token('profile'), firstName: 'X' }, { origin: base })).status, 200, 'a same-origin form, as Chrome sends it');
+    assert.equal((await post('profile', { csrf: token('profile'), firstName: 'X', lastName: 'Y', email: 'x@example.com', phone: '0501234567' }, { origin: base })).status, 200, 'a same-origin form, as Chrome sends it');
     assert.equal(saved.headers.get('cache-control'), 'no-store');
 
     const bad = await post('connect-rami-levy', { csrf: token('connect-rami-levy'), curl: 'fetch(...)' });

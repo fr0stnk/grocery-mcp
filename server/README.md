@@ -254,7 +254,7 @@ Every tool call is written to `audit_log`: the tool, the store account, the outc
 
 With `GROCERY_ACCOUNT_HTTP` set (HTTP mode only), the server also serves `/account`: the owner's profile, delivery address and store logins. It is a server-rendered page in `src/web/`, with no JavaScript.
 
-- **Profile and address:** the phone number and the address line (house, apartment, floor, entrance, notes) are encrypted with the master key. Name, email, city and street stay readable for delivery-zone lookups.
+- **Profile and address:** first name, last name, email and phone are required, and so are city, street, house number and apartment (checked on the server too). The phone number and the address line (house, apartment, floor, entrance, notes) are encrypted with the master key. Name, email, city and street stay readable for delivery-zone lookups.
 - **Store logins:** each store account shows its status (`From the server settings`, `Connected`, `Expires soon`, `Expired`, `Needs attention`, `Not connected`), its expiry and its last check.
   - Rami Levy is connected by pasting DevTools' "Copy as cURL" of a logged-in request, the same input as `scripts/set_rami_levy_tokens.py`. Only the tokens are kept, encrypted in the store account.
   - Disconnect deletes the saved login.

@@ -34,16 +34,14 @@ export function getProfile(db, vault, userId) {
 }
 
 export function saveProfile(db, vault, userId, input = {}) {
+  const firstName = clean(input.firstName, 'first_name');
+  const lastName = clean(input.lastName, 'last_name');
   const email = clean(input.email, 'email');
-  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new StoreError('the email address does not look right', 'INVALID_ARGUMENT');
   const phone = normalizePhone(input.phone);
-  db.prepare('UPDATE users SET first_name = ?, last_name = ?, email = ?, phone_enc = ? WHERE id = ?').run(
-    clean(input.firstName, 'first_name'),
-    clean(input.lastName, 'last_name'),
-    email,
-    phone ? vault.seal(phone, phoneContext(userId)) : null,
-    userId,
-  );
+  const missing = Object.entries({ 'first name': firstName, 'last name': lastName, email, phone }).filter(([, v]) => !v).map(([k]) => k);
+  if (missing.length) throw new StoreError(`${missing.join(', ')} ${missing.length === 1 ? 'is' : 'are'} required`, 'INVALID_ARGUMENT');
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new StoreError('the email address does not look right', 'INVALID_ARGUMENT');
+  db.prepare('UPDATE users SET first_name = ?, last_name = ?, email = ?, phone_enc = ? WHERE id = ?').run(firstName, lastName, email, vault.seal(phone, phoneContext(userId)), userId);
   return getProfile(db, vault, userId);
 }
 
@@ -61,7 +59,7 @@ export function getAddress(db, vault, userId) {
 
 export function saveAddress(db, vault, userId, input = {}) {
   const fields = Object.fromEntries(ADDRESS_FIELDS.map((f) => [f, clean(input[f.replace(/_(\w)/g, (_, c) => c.toUpperCase())], f)]));
-  if (!fields.city || !fields.street || !fields.house_number) throw new StoreError('city, street and house number are required', 'INVALID_ARGUMENT');
+  if (!fields.city || !fields.street || !fields.house_number || !fields.apartment) throw new StoreError('city, street, house number and apartment are required', 'INVALID_ARGUMENT');
   const existing = db.prepare('SELECT id FROM addresses WHERE user_id = ? AND is_default = 1').get(userId);
   const id = existing?.id ?? crypto.randomUUID();
   const line = JSON.stringify({ houseNumber: fields.house_number, apartment: fields.apartment, floor: fields.floor, entrance: fields.entrance, notes: fields.notes });

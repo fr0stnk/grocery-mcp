@@ -75,15 +75,15 @@ ${flash ? `<p class="flash ${flash.ok ? 'ok' : 'err'}" role="status">${esc(flash
 ${vaultReady ? '' : '<p class="flash err">The server has no master key (GROCERY_MASTER_KEY), so the phone, address and logins cannot be saved yet.</p>'}
 <section><h2>Store logins</h2><div class="stores">${accounts.map((acc) => storeCard(acc, csrf)).join('') || '<p class="meta">No stores are configured on this server.</p>'}</div></section>
 <section><h2>Profile</h2>${form('profile', csrf, `<div class="grid">
-  ${field('firstName', 'First name', profile.firstName, { autocomplete: 'given-name' })}
-  ${field('lastName', 'Last name', profile.lastName, { autocomplete: 'family-name' })}
-  ${field('email', 'Email', profile.email, { type: 'email', autocomplete: 'email' })}
-  ${field('phone', 'Phone', profile.phone, { type: 'tel', autocomplete: 'tel', dir: 'ltr' })}</div>`, 'Save profile')}</section>
+  ${field('firstName', 'First name', profile.firstName, { required: true, autocomplete: 'given-name' })}
+  ${field('lastName', 'Last name', profile.lastName, { required: true, autocomplete: 'family-name' })}
+  ${field('email', 'Email', profile.email, { type: 'email', required: true, autocomplete: 'email' })}
+  ${field('phone', 'Phone', profile.phone, { type: 'tel', required: true, autocomplete: 'tel', dir: 'ltr' })}</div>`, 'Save profile')}</section>
 <section><h2>Delivery address</h2><p class="meta">Used to work out delivery fees and minimum orders. Street and city may be in Hebrew.</p>${form('address', csrf, `<div class="grid">
   ${field('city', 'City', a.city, { required: true, autocomplete: 'address-level2' })}
   ${field('street', 'Street', a.street, { required: true, autocomplete: 'address-line1' })}
   ${field('houseNumber', 'House number', a.houseNumber, { required: true })}
-  ${field('apartment', 'Apartment', a.apartment)}
+  ${field('apartment', 'Apartment', a.apartment, { required: true })}
   ${field('floor', 'Floor', a.floor)}
   ${field('entrance', 'Entrance', a.entrance)}
   ${field('notes', 'Notes for the courier', a.notes, { wide: true })}</div>`, 'Save address')}</section>
