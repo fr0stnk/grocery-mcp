@@ -20,15 +20,23 @@ export function ensureLocalOwner(db, env = process.env) {
 }
 
 /**
- * The store account for a store whose login still comes from the server's
- * environment (status 'environment'), owned by `ownerId`. Phase 2 replaces the
- * environment with a session kept in session_enc.
+ * The owner's store account for a store, in whatever state it is: connected on
+ * the account page, expired, or still using the server's environment. Only
+ * when the owner has none is one created, with status 'environment'.
+ * Duplicate environment accounts left by v0.10.0-0.10.2, which looked for that
+ * status only and so added a second account after a store was connected, are
+ * removed when they hold no session.
  */
 export function ensureEnvironmentStoreAccount(db, store, ownerId) {
-  const found = db
-    .prepare("SELECT * FROM store_accounts WHERE store = ? AND owner_user_id = ? AND status = 'environment'")
-    .get(store, ownerId);
-  if (found) return found;
+  const owned = db
+    .prepare("SELECT * FROM store_accounts WHERE store = ? AND owner_user_id = ? ORDER BY (session_enc IS NOT NULL) DESC, (status = 'environment') ASC, created_at ASC")
+    .all(store, ownerId);
+  if (owned.length) {
+    const [keep, ...rest] = owned;
+    const remove = db.prepare("DELETE FROM store_accounts WHERE id = ? AND status = 'environment' AND session_enc IS NULL");
+    for (const extra of rest) remove.run(extra.id);
+    return keep;
+  }
   const id = crypto.randomUUID();
   const at = now();
   transaction(db, () => {

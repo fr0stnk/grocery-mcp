@@ -102,3 +102,22 @@ test('bootstrap imports preferences.json and price-history.db once and keeps the
   assert.ok(logs.some((m) => /imported 1 preferences/.test(m)));
   db.close();
 });
+
+test('a connected store account is found again at startup, and the duplicate from v0.10.x is removed', async () => {
+  const { saveSession } = await import('../src/db/sessions.js');
+  const { createVault, newMasterKey } = await import('../src/db/vault.js');
+  const db = await openDatabase(path.join(tempDir(), 'g.db'));
+  const vault = createVault({ GROCERY_MASTER_KEY: newMasterKey() });
+  const owner = ensureLocalOwner(db, {});
+  const rami = ensureEnvironmentStoreAccount(db, 'rami-levy', owner.id);
+  saveSession(db, vault, rami.id, { bearerToken: 'b' }, { expiresAt: '2027-01-23T00:00:00.000Z' });
+  assert.equal(ensureEnvironmentStoreAccount(db, 'rami-levy', owner.id).id, rami.id, 'the connected account, not a new one');
+  // The duplicate an older version created next to the connected account.
+  db.prepare("INSERT INTO store_accounts (id, store, owner_user_id, status, created_at, updated_at) VALUES ('dup', 'rami-levy', ?, 'environment', '2026-11-25', '2026-11-25')").run(owner.id);
+  db.prepare("INSERT INTO store_access (store_account_id, user_id, role, created_at) VALUES ('dup', ?, 'owner', '2026-11-25')").run(owner.id);
+  assert.equal(ensureEnvironmentStoreAccount(db, 'rami-levy', owner.id).id, rami.id);
+  assert.deepEqual(db.prepare("SELECT id FROM store_accounts WHERE store = 'rami-levy'").all().map((r) => r.id), [rami.id], 'the empty duplicate is gone');
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM store_access WHERE store_account_id = 'dup'").get().n, 0, 'with its access rows');
+  db.close();
+});
+
