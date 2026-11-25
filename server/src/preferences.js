@@ -148,7 +148,7 @@ export const PREFERENCE_TOOLS = [
   {
     name: 'remove_preference',
     title: 'Remove a household preference',
-    description: 'Delete one saved preference by name. Confirm with the user first.',
+    description: 'Delete one saved preference by name. Confirm with the user first. Removing a name that does not exist returns NOT_FOUND.',
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true },
     inputSchema: {
       type: 'object',

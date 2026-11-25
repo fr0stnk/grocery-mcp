@@ -89,7 +89,7 @@ For each item it chooses one product per store. First, the query's own constrain
 Next, the candidates are narrowed to those that are the product asked for (`src/match.js`):
 
 - A product must name the query's first word, usually the kind of product, among the first two words of its name, or else match at least two of the query's words. `שריר עגל בננה` is a veal cut, not bananas.
-- Of the rest, only those matching the most query words are kept, then those with the fewest **unrequested** words: variants and derived products the query does not mention, such as `דיאט`, `זירו`, `לימון`, `אומגה`, `קפוא`, `מלא`, `שרי`, `בחומץ` or `שוקולד`, and multipacks such as `שישייה` or `6*1.5`. Then those naming the product first are preferred. So `קוקה קולה זירו` gets plain Zero rather than lemon Zero, and `ביצים L 12` gets ordinary rather than Omega-3 eggs.
+- Of the rest, only those matching the most query words are kept, then those with the fewest **unrequested** words: variants and derived products the query does not mention, such as `דיאט`, `זירו`, `לימון`, `אומגה`, `קפוא`, `מלא`, `שרי`, `בחומץ`, `שוקולד` or `מיץ`, added flavours such as `עגבניות`, `זיתים` or `שום` (`לחם מחמצת עגבניות` for `לחם`), and multipacks such as `שישייה` or `6*1.5`. Then those naming the product first are preferred. So `קוקה קולה זירו` gets plain Zero rather than lemon Zero, and `ביצים L 12` gets ordinary rather than Omega-3 eggs.
 - When a store has only such variants, the closest is offered with `unrequested` listing the words, for example Diet Coke for `קוקה קולה 1.5 ליטר`. The item is then `notEquivalent` and the client is asked to confirm it.
 - Store abbreviations are expanded first (`לל"ג` → `ללא גלוטן`, `ללת"ס` → `ללא תוספת סוכר`, `נטול` → `ללא`).
 

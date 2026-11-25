@@ -185,3 +185,10 @@ test('GROC-016: compare_basket says to translate a query with no Hebrew letters'
   assert.ok(out.notes.some((n) => /no Hebrew letters: lactose free milk\. Translate/.test(n)));
   assert.ok(!(await compare([{ query: 'חלב 3% 1 ליטר', quantity: 1 }])).notes.some((n) => /Translate/.test(n)));
 });
+
+test('GROC-008: a flavoured bread loses to plain bread, and is flagged when it is all a store has', () => {
+  const breads = [{ name: 'לחם מחמצת עגבניות', price: 20.9 }, { name: 'לחם מחמצת', price: 18.9 }];
+  assert.deepEqual(bestCandidates(breads, 'לחם').map((x) => x.name), ['לחם מחמצת']);
+  assert.deepEqual(bestCandidates([breads[0]], 'לחם')[0].unrequested, ['עגבניות']);
+  assert.equal(bestCandidates([{ name: 'עגבניות ארוזות' }], 'עגבניות')[0].unrequested, undefined, 'a flavour the query asks for is not a variant');
+});
