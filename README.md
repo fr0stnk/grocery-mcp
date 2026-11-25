@@ -136,7 +136,7 @@ To use a single store's server without the combined server, run `docker compose 
 1. It runs the server tests.
 2. It builds the `grocery`, `rami-levy`, `shufersal` and `tunnel` images for amd64 and arm64.
 
-Pushes to `main` publish the images as `ghcr.io/fr0stnk/grocery-mcp-<image>`, tagged `latest` and `sha-<commit>`. `v*` tags also publish a version tag. Pull requests only test and build.
+Pushes to `main` publish the images as `ghcr.io/fr0stnk/grocery-mcp-<image>`, tagged `latest` and `sha-<commit>`. `v*` tags also publish a version tag: a release commit is already built by its push to `main`, so the tag run waits for that build's `sha-<commit>` images and adds the version tag to them in seconds instead of building the same commit again. It builds only when there is nothing to reuse. Pull requests only test and build.
 
 The compose files use these images by default. `GROCERY_IMAGE_TAG` pins a tag, for example `sha-1a2b3c4`. `GROCERY_IMAGE_PREFIX` points to another registry or to local names.
 
