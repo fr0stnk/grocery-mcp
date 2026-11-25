@@ -19,7 +19,9 @@ export const BASKET_TOOL = {
     'club-only offers are listed but not applied. Returns per-store totals with missing items, a fair comparison over items both stores have like for like, ' +
     'and the total if each item is bought where it is cheaper. Items marked notEquivalent (different amounts, price bases or an unrequested variant) have no cheapestStore ' +
     'and are left out of both, so never claim savings on them. Delivery fees and minimum orders are not included. ' +
-    'For weighed items (soldByWeight) the quantity is in kilograms. Items may name a saved household preference instead of a query, ' +
+    'For weighed items (soldByWeight) the quantity is in kilograms; Shufersal packaged produce is priced per kg but sold in whole packs: such offers carry packs ' +
+    '(quantity ÷ packWeightKg, rounded, half up, at least 1), packWeightKg and packPrice, and add_basket_to_cart takes packs as their quantity. ' +
+    'A multipack of the requested size (6×1.5 L for 1.5 ליטר) is offered only when nothing single is, marked unrequested on the offer and the item. Items may name a saved household preference instead of a query, ' +
     'and usual: true adds every preference in the usual basket. ' +
     'To price a past order in every store ("what would last week\'s order cost at Rami Levy?"), pass source: {store, order: "latest" or an order code}; ' +
     'its lines are matched by barcode where possible, otherwise by name (matchedBy: "name", so say the product may differ), with weighed quantities in kilograms. ' +
@@ -127,8 +129,11 @@ export function fitOf(product, constraints, { strict = [] } = {}) {
   let unknown = false;
   if (constraints.size) {
     const s = sizeOf(product);
+    const want = constraints.size;
+    const fits = (x) => x && x.unit === want.unit && close(x.amount, want.amount);
+    // A multipack of the requested size fits; it is marked unrequested when candidates are chosen.
     if (!s) unknown = true;
-    else if (s.unit !== constraints.size.unit || !close(s.amount, constraints.size.amount)) return `size ${s.label}, not ${constraints.size.label}`;
+    else if (!fits(s) && !fits(sizeOf({ size: product.itemSize }))) return `size ${s.label}, not ${want.label}`;
   }
   if (constraints.count) {
     const n = product.count ?? parseCount(product.name);
@@ -214,8 +219,15 @@ export function lineCost(match, quantity) {
 
 const FRACTIONAL = 'INCOMPATIBLE_QUANTITY_BASIS';
 
+/** Whole packs for a weight in kg: the nearest number of packs, half rounding up, and at least one. */
+export function packsFor(quantity, packWeightKg) {
+  return Math.max(1, Math.round(quantity / packWeightKg));
+}
+
 function offer(match, quantity) {
   if (!match) return null;
+  // A pack priced per kg (Shufersal packaged produce) is bought in whole packs of about packWeightKg.
+  const packs = match.packWeightKg ? packsFor(quantity, match.packWeightKg) : null;
   // A fractional quantity means kilograms; it cannot be multiplied by a unit or package price.
   if (!Number.isInteger(quantity) && (match.priceBasis ?? 'unit') !== 'kg') return { excluded: FRACTIONAL, productId: match.productId, name: match.name, priceBasis: match.priceBasis ?? 'unit' };
   const clubOffer = match.promotions?.find((p) => p.clubOnly)?.text;
@@ -231,7 +243,7 @@ function offer(match, quantity) {
     ...(match.count ? { count: match.count } : {}),
     ...(match.fit ? { fit: match.fit } : {}),
     ...(match.unrequested ? { unrequested: match.unrequested } : {}),
-    ...lineCost(match, quantity),
+    ...(packs ? { packs, packWeightKg: match.packWeightKg, packPrice: match.packPrice, lineTotal: round(packs * match.packPrice) } : lineCost(match, quantity)),
     ...(clubOffer ? { clubOffer } : {}),
     ...(match.soldByWeight ? { soldByWeight: true } : {}),
   };
@@ -460,6 +472,7 @@ export async function compareBasket(stores, args = {}, { timeoutMs = 45_000, cac
     }));
     // Identity is claimed only for offers that can actually be priced.
     if (identical && !Object.values(offers).every(isPriced)) identical = false;
+    const unrequested = [...new Set(Object.values(offers).flatMap((o) => o?.unrequested ?? []))];
     const equivalence = identical ? null : equivalenceOf(Object.values(offers).filter(isPriced));
     return {
       query: it.query,
@@ -471,6 +484,7 @@ export async function compareBasket(stores, args = {}, { timeoutMs = 45_000, cac
       ...(it.packs ? { packs: it.packs, note: `about ${it.quantity} kg; stores selling it by weight are priced for that, others for ${it.packs} pack` } : {}),
       ...(it.barcode ? { barcode: it.barcode } : {}),
       identical,
+      ...(unrequested.length ? { unrequested } : {}),
       ...(identical ? { confidence: Object.values(offers).some((o) => o?.barcodeInferred) ? 'inferred' : 'exact' } : {}),
       // Different amounts of different products have no cheaper store.
       cheapestStore: equivalence && equivalence !== 'match' ? null : cheapest(offers),
@@ -516,6 +530,10 @@ export async function compareBasket(stores, args = {}, { timeoutMs = 45_000, cac
   if (lines.some((l) => !l.identical && Object.values(l.offers).filter(isPriced).length > 1)) notes.push('Items with identical: false compare different products; check that they are acceptable substitutes.');
   if (lines.some((l) => l.notEquivalent)) notes.push('Items whose products differ in size, count or how they are sold (notEquivalent) are in each store\'s total but have no cheapestStore and are left out of comparable and of the split total (split.leftOut); ask which product the user wants.');
   if (lines.some((l) => Object.values(l.offers).some((o) => o?.excluded))) notes.push('A fractional quantity is kilograms; products sold by unit or package cannot be priced for it and are listed in notComparable. Ask for whole units, or choose a product sold by weight.');
+  for (const l of lines.filter((x) => x.identical && x.unrequested)) {
+    notes.push(`"${l.query}": every store offers only ${l.offers[selected[0].id].name} (${l.unrequested.join(', ')}), the same product, priced as sold; tell the user before ordering.`);
+  }
+  if (lines.some((l) => Object.values(l.offers).some((o) => o?.packs))) notes.push('Offers with packs are packaged produce priced per kg: the quantity in kg is rounded to whole packs of about packWeightKg (half rounds up, at least one), and lineTotal is packs × packPrice. The final charge follows the actual weight. To order, pass packs as the quantity to add_basket_to_cart.');
   if (lines.some((l) => Object.values(l.offers).some((o) => o?.unrequested))) notes.push('Offers with unrequested are the closest product a store has, but carry a variant or pack the query did not ask for (Diet, flavoured, frozen, a six-pack); confirm them with the user.');
   if (lines.some((l) => Object.values(l.offers).some((o) => o?.fit === 'unverified'))) notes.push('Offers with fit: unverified could not be checked against the size, count or grade in the query; confirm them.');
   if (lines.some((l) => l.constraints && Object.values(l.offers).some((o) => !o))) notes.push('A store with no product matching the size, count or grade in the query lists the item as missing rather than offering a different one.');

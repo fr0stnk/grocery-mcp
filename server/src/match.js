@@ -95,7 +95,9 @@ export function scoreOf(item, terms, query) {
   const unrequested = words.filter((w) => inSet(VARIANT_WORDS, w) && !asked.has(w) && !asked.has(bareOf(w)));
   const asksForPack = queryWords.some((w) => inSet(MULTIPACK_WORDS, w)) || MULTIPACK_RE.test(String(query));
   if (!asksForPack) {
-    const pack = words.find((w) => inSet(MULTIPACK_WORDS, w)) ?? (MULTIPACK_RE.test(item.name ?? '') ? 'multipack' : null);
+    const pack = item.packCount > 1
+      ? `${item.packCount}×${item.itemSize}`
+      : words.find((w) => inSet(MULTIPACK_WORDS, w)) ?? (MULTIPACK_RE.test(item.name ?? '') ? 'multipack' : null);
     if (pack) unrequested.push(pack);
   }
   return { matched: matchedTerms(item, terms), head, penalty: unrequested.length, unrequested: [...new Set(unrequested)] };

@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { compareBasket, constraintsOf, fitOf, pickMatches, statedIn } from '../src/basket.js';
+import { compareBasket, constraintsOf, fitOf, packsFor, pickMatches, statedIn } from '../src/basket.js';
+import { normalizeRamiCatalog, normalizeShufersalRaw } from '../src/normalize.js';
 import { SearchCache } from '../src/cache.js';
 import { bestCandidates, queryTerms } from '../src/match.js';
 import { relevantOnly } from '../src/search.js';
@@ -91,4 +92,52 @@ test('GROC-006: ordinary eggs, fresh chicken and plain rice are preferred to pre
 
 test('identical products still match by barcode', async () => {
   for (const query of ['חלב 3% 1 ליטר', 'חמאה 200 גרם', 'חלב ללא לקטוז']) assert.equal((await one(query)).identical, true, query);
+});
+
+// Raw rows as Shufersal's search and Rami Levy's catalog returned them on 2026-11-25.
+const shufersalRaw = (extra) => ({ stock: { stockLevelStatus: { code: 'inStock' } }, promotionMsg: null, ...extra });
+const NEVIOT_S = shufersalRaw({ code: 'P_7290110114855', sku: '7290110114855', name: 'מים מינרליים נביעות', brandName: 'נביעות', unitDescription: '6*1.5 ליטר', sellingMethod: { code: 'BY_UNIT' }, price: { value: 16.5 }, pricePerUnit: { value: 0.18 }, valueForComparison: 100, unitForComparison: 'מ"ל' });
+const NEVIOT_R = { id: 386532, barcode: '7290110114855', name: 'מים מינרליים נביעות שישייה 1.5 ליטר', price: { price: 16.5 }, prop: { by_kilo: 0 } };
+const TOMATO_S = shufersalRaw({ code: 'P_7296073440314', sku: '7296073440314', name: 'עגבניה טרייה ארוזה', unitDescription: 'כ- 8 יחידות', sellingMethod: { code: 'BY_PACKAGE' }, price: { value: 8.9 }, minWeight: 900, maxWeight: 1100, pricePerUnit: { value: 8.9 }, valueForComparison: 1, unitForComparison: 'ק"ג' });
+const NO_WEIGHT_S = shufersalRaw({ code: 'P_7296073440345', sku: '7296073440345', name: 'עגבניה ארוזה קטנה', unitDescription: 'כ-4 יחידות', sellingMethod: { code: 'BY_PACKAGE' }, price: { value: 8.9 }, pricePerUnit: { value: 8.9 }, valueForComparison: 1, unitForComparison: 'ק"ג' });
+const TOMATO_R = { id: 2, barcode: null, name: 'עגבניה', price: { price: 8.9 }, prop: { by_kilo: 1 } };
+const rawStores = (shufersal, rami) => [
+  { id: 'shufersal', label: 'Shufersal', search: { maxLimit: 20, run: async () => normalizeShufersalRaw(shufersal) } },
+  { id: 'rami-levy', label: 'Rami Levy', search: { maxLimit: 20, run: async () => normalizeRamiCatalog({ data: rami }) } },
+];
+const compareRaw = (stores, items) => compareBasket(stores, { items }, { cache: new SearchCache() });
+
+test('GROC-010: a six-pack has the same total and pack size whichever store describes it', async () => {
+  const [s] = normalizeShufersalRaw([NEVIOT_S]);
+  const [r] = normalizeRamiCatalog({ data: [NEVIOT_R] });
+  for (const x of [s, r]) assert.deepEqual([x.size, x.packCount, x.itemSize], ['9 L', 6, '1.5 L'], x.store);
+  const [line] = (await compareRaw(rawStores([NEVIOT_S], [NEVIOT_R]), [{ query: 'מים מינרליים 1.5 ליטר', quantity: 1 }])).items;
+  assert.equal(line.identical, true, 'the same barcode in both stores');
+  assert.deepEqual(line.unrequested, ['6×1.5 L']);
+  assert.equal(line.cheapestStore, null, 'same price');
+  assert.ok(!line.notEquivalent, 'the same six-pack is compared exactly');
+});
+
+test('GROC-010: a single bottle beats a six-pack where a store has one, and the pair is not like for like', async () => {
+  const bottle = shufersalRaw({ code: 'P_1', name: 'מים מינרליים נביעות', unitDescription: '1.5 ליטר', sellingMethod: { code: 'BY_UNIT' }, price: { value: 3.9 } });
+  const [line] = (await compareRaw(rawStores([NEVIOT_S, bottle], [NEVIOT_R]), [{ query: 'מים מינרליים 1.5 ליטר', quantity: 1 }])).items;
+  assert.equal(line.offers.shufersal.productId, 'P_1');
+  assert.equal(line.identical, false);
+  assert.match(line.notEquivalent, /not asked for|9 L vs 1.5 L|1.5 L vs 9 L/);
+});
+
+test('GROC-009: Shufersal packaged produce is priced per kg and bought in whole packs', async () => {
+  const [tomato, plain] = normalizeShufersalRaw([TOMATO_S, NO_WEIGHT_S]);
+  assert.deepEqual([tomato.priceBasis, tomato.pricePerUnit, tomato.perUnit, tomato.packWeightKg, tomato.packPrice, tomato.priceEstimated], ['kg', 8.9, 'kg', 1, 8.9, true]);
+  assert.equal(plain.priceBasis, 'package', 'a pack without a weight range keeps the estimated package price');
+  const stores = rawStores([TOMATO_S], [TOMATO_R]);
+  const [oneKg] = (await compareRaw(stores, [{ query: 'עגבניה', quantity: 1 }])).items;
+  assert.deepEqual([oneKg.offers.shufersal.packs, oneKg.offers.shufersal.lineTotal, oneKg.offers['rami-levy'].lineTotal], [1, 8.9, 8.9]);
+  assert.ok(!oneKg.notEquivalent, 'kg against kg');
+  const out = await compareRaw(stores, [{ query: 'עגבניה', quantity: 2.5 }]);
+  const [twoHalf] = out.items;
+  assert.deepEqual([packsFor(2.5, 1), twoHalf.offers.shufersal.packs, twoHalf.offers.shufersal.lineTotal], [3, 3, 26.7], '2.5 packs round half up to 3');
+  assert.equal(twoHalf.offers['rami-levy'].lineTotal, 22.25);
+  assert.equal(out.comparable.items, 1);
+  assert.deepEqual([packsFor(0.2, 1), packsFor(1.4, 1)], [1, 1]);
 });

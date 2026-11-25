@@ -11,7 +11,7 @@ export const ADD_BASKET_TOOL = {
     'Add several products to one store\'s real cart in a single step, usually the chosen store\'s offers from compare_basket. ' +
     'Pass each offer\'s productId and quantity. The server checks every product before anything is added, with the same checks in a dry run: ' +
     'unknown products and out-of-stock items are rejected with a code; for products sold by weight (both stores) quantity is kilograms ' +
-    '(Shufersal in 0.5 kg steps), and packs and units take whole numbers; ' +
+    '(Shufersal in 0.5 kg steps), and packs and units take whole numbers: for a compare_basket offer with packs (Shufersal packaged produce), pass packs, not kilograms; ' +
     'and Rami Levy names and prices come from the server\'s own search results rather than the request ' +
     '(a Rami Levy product outside recent results is looked up by its name, and refused as PRODUCT_NOT_VERIFIED if not found). ' +
     'Each item gets a status (added, would-add or rejected); complete is false when anything was rejected. Quantities are added to what is ' +
@@ -97,7 +97,8 @@ async function checkShufersal(store, it, cache) {
   } else if (!Number.isInteger(it.quantity)) {
     return reject(it, 'INVALID_QUANTITY', `${product.name} is sold by ${method === 'BY_PACKAGE' ? 'pack' : 'unit'}; use a whole number`);
   }
-  return { ...it, productId: product.productId, name: product.name, price: product.price, priceBasis: product.priceBasis ?? 'unit', sellingMethod: method, priceSource: 'server' };
+  const pack = method === 'BY_PACKAGE' && product.packPrice ? { price: product.packPrice, priceBasis: 'package', priceEstimated: true, packWeightKg: product.packWeightKg, pricePerKg: product.price } : {};
+  return { ...it, productId: product.productId, name: product.name, price: product.price, priceBasis: product.priceBasis ?? 'unit', sellingMethod: method, priceSource: 'server', ...pack };
 }
 
 /**

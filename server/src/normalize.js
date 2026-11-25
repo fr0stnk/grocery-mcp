@@ -30,18 +30,27 @@ const SIZE_RE = new RegExp(
   'u',
 );
 
-/** Reads a pack size such as "2 ליטר", "1 ל'", "6*200 מ\"ל" or "500 גרם". */
+// Words that make a size the size of each item in a pack: "שישייה 1.5 ליטר" is six 1.5 L bottles.
+const PACK_WORDS = [[/שישי(?:י)?(?:ה|ת)/u, 6], [/רביעי(?:י)?(?:ה|ת)/u, 4], [/(?:^|\s)(?:זוג|צמד)(?=\s|$)/u, 2]];
+
+/**
+ * Reads a pack size such as "2 ליטר", "1 ל'", "6*200 מ\"ל" or "500 גרם". The
+ * amount is the total; a multipack ("6*1.5 ליטר", or a pack word such as
+ * "שישייה" beside the size) also gives `pack`, the number of items, and `each`,
+ * the size of one.
+ */
 export function parseSize(text) {
   if (typeof text !== 'string') return null;
   const normalized = text.replace(/[״]/g, '"').replace(/[׳]/g, "'");
   const m = SIZE_RE.exec(normalized);
   if (!m) return null;
-  const count = m[1] ? Number(m[1]) : 1;
   const value = Number(m[2].replace(',', '.'));
+  const count = m[1] ? Number(m[1]) : (PACK_WORDS.find(([re]) => re.test(normalized))?.[1] ?? 1);
   const { unit, factor } = UNIT_BY_TOKEN.get(m[3]);
   const amount = round(count * value * factor, 4);
   if (!(amount > 0)) return null;
-  return { amount, unit, label: `${amount} ${unit}` };
+  const each = round(value * factor, 4);
+  return { amount, unit, label: `${amount} ${unit}`, ...(count > 1 ? { pack: count, each: `${each} ${unit}` } : {}) };
 }
 
 const COUNT_RE = /(\d+)\s*(?:יחידות|יחי'|יח'|יח)(?=$|[\s,.;:)\-/])/u;
@@ -121,6 +130,7 @@ function item(store, { productId, barcode = null, barcodeInferred = false, name,
     brand: brand || null,
     size: size?.label ?? (count ? `${count} pcs` : null),
     ...(count ? { count } : {}),
+    ...(size?.pack ? { packCount: size.pack, itemSize: size.each } : {}),
     price: p,
     ...(regularPrice != null && p != null && regularPrice > p + 0.005 ? { regularPrice } : {}),
     priceBasis: basis,
@@ -262,6 +272,13 @@ export function normalizeShufersalRaw(results) {
       // When no unit price could be derived, use Shufersal's own comparison price
       // (for packaged produce this is per kilogram).
       if (normalized.pricePerUnit == null && official) Object.assign(normalized, official);
+      // A pack with a weight range is priced per kilogram: Shufersal charges price × the pack's
+      // actual weight, which its site estimates from the midpoint (900–1100 g at 8.9 is about ₪8.90).
+      const [min, max] = [Number(p.minWeight), Number(p.maxWeight)];
+      if (method === 'BY_PACKAGE' && min > 0 && max >= min && Number(price) > 0) {
+        const packWeightKg = round((min + max) / 2000, 3);
+        Object.assign(normalized, { priceBasis: 'kg', priceEstimated: true, pricePerUnit: Number(price), perUnit: 'kg', packWeightKg, packPrice: round(packWeightKg * Number(price)) });
+      }
       return normalized;
     });
 }
