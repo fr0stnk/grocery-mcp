@@ -259,7 +259,9 @@ With `GROCERY_ACCOUNT_HTTP` set (HTTP mode only), the server also serves `/accou
   - Rami Levy is connected by pasting DevTools' "Copy as cURL" of a logged-in request, the same input as `scripts/set_rami_levy_tokens.py`. Only the tokens are kept, encrypted in the store account.
   - Disconnect deletes the saved login.
   - A login saved here replaces the `.env` one for that store: the adapter's environment is updated and the adapter restarts on its next call. The login warnings follow the new expiry.
-  - Connecting Shufersal from the page comes next. Its login still comes from `.env`.
+  - Shufersal is connected with its email or ID and password. The server passes them to the adapter's host-only `login_with_password` tool (enabled with `SHUFERSAL_PASSWORD_TOOL=1` and never forwarded to clients), which logs in and saves the cookie jar. The server encrypts the jar into the store account. The password is used for that one login and is not stored, logged or shown again. When the session expires, log in on the page again.
+  - The adapter renews Shufersal's cookies in its cookie file as it works. The server copies a newer file into the vault every 10 minutes, and restores the file from the vault only when it is missing, for example on a new volume. Disconnecting deletes both.
+  - To keep no Shufersal password on the server, remove `SHUFERSAL_USERNAME` and `SHUFERSAL_PASSWORD` from `.env` after connecting, and from the GitHub `production` environment, since deploys write those secrets back into `.env`. Without them the adapter cannot log in by itself, so an expired session means logging in on the page.
 - **No sign-in yet** (sign-in comes with OAuth), so the listener is the protection:
   - It refuses to start on anything but loopback or the tailnet (100.64.0.0/10, fd7a:115c:a1e0::/48).
   - It answers only to its own address, `localhost`, `127.0.0.1` and the names in `GROCERY_ACCOUNT_HOSTS`, which blocks DNS rebinding.
@@ -391,6 +393,7 @@ The tests use stand-in adapters from `test/fixtures/`, so they need no credentia
 | `src/order.js` | `add_basket_to_cart`: one bulk add per store |
 | `src/preferences.js` | Household preference store and its three tools |
 | `src/web/` | The account page: profile, address and store logins, with its listener guard, CSRF and page markup |
+| `src/shufersal-session.js` | Reads and writes the Shufersal adapter's cookie jar for the session vault |
 | `src/rami-curl.js` | Reads a Rami Levy login from DevTools' "Copy as cURL" |
 | `src/db/` | Database: migrations, encryption vault, people and store accounts, preferences, audit log, and the import of older files |
 | `src/history.js` | Price history: SQLite recording, `price_history` and the daily preference tracker |

@@ -104,3 +104,40 @@ test('the account page saves forms with CSRF tokens, refuses others, and connect
     db.close();
   }
 });
+
+test('Shufersal is connected with a password used once: only the cookie jar is stored', async () => {
+  const { db, vault, owner } = await setup();
+  const shufersal = db.prepare("SELECT id FROM store_accounts WHERE store = 'shufersal'").get();
+  const calls = [];
+  const connectShufersal = async (username, password) => {
+    calls.push(username);
+    if (password !== 'right') throw Object.assign(new Error('Shufersal did not accept the login: שם משתמש או סיסמה לא נכונים'), { code: 'LOGIN_REJECTED' });
+    return { session: { cookies: [{ name: 'JSESSIONID', value: 'v', expires: -1 }] }, expiresAt: null };
+  };
+  const probe = await startAccountServer({ host: '127.0.0.1', port: 0, db, vault, ownerId: owner.id });
+  const port = probe.address().port;
+  probe.close();
+  const server = await startAccountServer({ host: '127.0.0.1', port, db, vault, ownerId: owner.id, connectShufersal });
+  const base = `http://127.0.0.1:${port}`;
+  try {
+    const page = await (await fetch(`${base}/account`)).text();
+    assert.match(page, /type="password"[^>]*autocomplete="current-password"/);
+    const csrf = /action="\/account\/connect-shufersal">\s*<input type="hidden" name="csrf" value="([^"]+)"/.exec(page)[1];
+    const post = (fields) => fetch(`${base}/account/connect-shufersal`, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ csrf, ...fields }) });
+    const refused = await post({ username: 'me@example.com', password: 'wrong' });
+    const refusedHtml = await refused.text();
+    assert.equal(refused.status, 400);
+    assert.match(refusedHtml, /did not accept the login/);
+    assert.equal(refusedHtml.includes('wrong'), false, 'the password is never echoed');
+    const ok = await post({ username: 'me@example.com', password: 'right' });
+    assert.match(await ok.text(), /Shufersal connected\. The password was used to log in and was not stored/);
+    const row = db.prepare('SELECT session_enc FROM store_accounts WHERE id = ?').get(shufersal.id);
+    assert.deepEqual(loadSession(db, vault, shufersal.id), { cookies: [{ name: 'JSESSIONID', value: 'v', expires: -1 }] });
+    assert.equal(row.session_enc.includes('right'), false);
+    assert.deepEqual(calls, ['me@example.com', 'me@example.com']);
+  } finally {
+    server.close();
+    db.close();
+  }
+});
+

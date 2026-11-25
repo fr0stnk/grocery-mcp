@@ -33,7 +33,12 @@ function storeCard(a, csrf) {
           <ol class="steps"><li>Log in at rami-levy.co.il in your browser.</li><li>Open DevTools → Network → Fetch/XHR and reload.</li><li>Right-click a request such as <code>cart</code> → Copy → Copy as cURL.</li><li>Paste it below. Only the login tokens are kept, encrypted.</li></ol>
           ${form('connect-rami-levy', csrf, '<label class="field wide"><span>Copied request</span><textarea id="curl" name="curl" rows="5" required spellcheck="false" autocomplete="off" placeholder="curl \'https://www.rami-levy.co.il/api/v2/cart\' …"></textarea></label>', 'Connect Rami Levy')}
         </details>`
-      : `<p class="meta">Connecting Shufersal with its password from this page comes in the next step; until then its login stays in the server settings.</p>`;
+      : `<details${['expired', 'expiring', 'disconnected', 'environment', 'error'].includes(a.shown) ? ' open' : ''}><summary>${a.shown === 'connected' ? 'Log in again' : 'Connect Shufersal'}</summary>
+          <p class="hint">The password is used once to log in and is not stored; only the session is kept, encrypted. When it expires, log in here again.</p>
+          ${form('connect-shufersal', csrf, `<div class="grid">
+            <label class="field"><span>Email or ID number</span><input id="shufersal-username" name="username" type="text" required autocomplete="username" dir="ltr"></label>
+            <label class="field"><span>Password</span><input id="shufersal-password" name="password" type="password" required autocomplete="current-password" dir="ltr"></label></div>`, 'Connect Shufersal')}
+        </details>`;
   const disconnect = a.role === 'owner' && ['connected', 'expiring', 'expired', 'error'].includes(a.shown)
     ? form('disconnect', csrf, `<input type="hidden" name="account" value="${esc(a.id)}">`, 'Disconnect and delete the login')
     : '';

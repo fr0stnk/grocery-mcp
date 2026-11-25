@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import fs from 'node:fs';
 import path from 'node:path';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { AccountMonitor } from './accounts.js';
@@ -10,7 +11,9 @@ import { databaseFile, openDatabase } from './db/database.js';
 import { recordAudit } from './db/people.js';
 import { DbPreferenceStore } from './db/preferences.js';
 import { createVault } from './db/vault.js';
-import { loadSession } from './db/sessions.js';
+import { loadSession, refreshSession } from './db/sessions.js';
+import { jarExpiry, readCookieJar, writeCookieJar } from './shufersal-session.js';
+import { StoreError } from './normalize.js';
 import { tokenExpiry } from './accounts.js';
 import { startAccountServer } from './web/account.js';
 import { PriceHistory, startTracker } from './history.js';
@@ -34,6 +37,9 @@ const log = (message) => process.stderr.write(`[grocery] ${message}\n`);
 const readOnly = /^(1|true|yes)$/i.test(process.env.GROCERY_READ_ONLY ?? '');
 const httpListen = process.env.GROCERY_HTTP ? parseListen(process.env.GROCERY_HTTP) : null;
 const stores = createStores();
+// The Shufersal adapter's host-only login tool, used by the account page; never forwarded to clients.
+const STORE_ENV = { shufersal: { SHUFERSAL_PASSWORD_TOOL: '1' } };
+for (const s of stores) Object.assign(s.env, STORE_ENV[s.id] ?? {});
 const monitor = new AccountMonitor();
 const historyOff = /^(0|false|no|off)$/i.test(process.env.GROCERY_PRICE_HISTORY ?? '');
 
@@ -57,15 +63,54 @@ try {
   // A store login saved on the account page replaces the one from .env for that
   // store's adapter. Adapters read their environment when they start, so a
   // change closes the adapter and the next call starts it with the new login.
-  const applySession = (storeId) => {
+  // Shufersal's session is the adapter's cookie file. The vault restores it only
+  // when it is missing (a fresh volume): the adapter renews cookies in the file,
+  // so the file is never overwritten by an older copy; it is copied back instead.
+  const cookieFile = process.env.SHUFERSAL_COOKIE_FILE;
+  const applySession = (storeId, { disconnected = false } = {}) => {
     const store = stores.find((s) => s.id === storeId);
     const account = accounts.find((a) => a.store === storeId);
-    if (!store || !account || !vault.available || !SESSION_ENV[storeId]) return false;
+    if (!store || !account || !vault.available) return false;
     const session = loadSession(db, vault, account.id);
-    store.env = { ...process.env, ...(session ? SESSION_ENV[storeId](session) : {}) };
+    if (storeId === 'shufersal' && cookieFile) {
+      if (session && !readCookieJar(cookieFile)) writeCookieJar(cookieFile, session);
+      if (!session && disconnected) fs.rmSync(cookieFile, { force: true });
+      return Boolean(session);
+    }
+    if (!SESSION_ENV[storeId]) return false;
+    store.env = { ...process.env, ...(STORE_ENV[storeId] ?? {}), ...(session ? SESSION_ENV[storeId](session) : {}) };
     if (storeId === 'rami-levy') monitor.ramiTokenExpiry = tokenExpiry(store.env.RAMI_LEVY_ECOM_TOKEN);
     return Boolean(session);
   };
+
+  // Logs Shufersal in with a password typed on the account page; only the cookie jar is returned.
+  const connectShufersal = async (username, password) => {
+    const store = stores.find((s) => s.id === 'shufersal');
+    if (!store || !cookieFile) throw new StoreError('Shufersal is not configured on this server', 'STORE_UNAVAILABLE');
+    const result = await store.callTool('login_with_password', { username, password }, 90_000);
+    const text = (result.content ?? []).map((c) => c.text ?? '').join('\n');
+    if (result.isError) throw new StoreError(`Shufersal did not accept the login: ${text.slice(0, 200)}`, 'LOGIN_REJECTED');
+    const jar = readCookieJar(cookieFile);
+    if (!jar) throw new StoreError('Shufersal logged in but no session was saved; try again', 'STORE_ERROR');
+    return { session: jar, expiresAt: jarExpiry(jar) };
+  };
+
+  // Copy cookies the adapter renewed back into the vault, so a lost volume can be restored.
+  const shufersalAccount = accounts.find((a) => a.store === 'shufersal');
+  if (shufersalAccount && cookieFile && httpListen) {
+    let synced = 0;
+    const timer = setInterval(() => {
+      try {
+        const mtime = fs.statSync(cookieFile).mtimeMs;
+        const jar = mtime > synced && readCookieJar(cookieFile);
+        if (jar && loadSession(db, vault, shufersalAccount.id)) refreshSession(db, vault, shufersalAccount.id, jar);
+        synced = mtime;
+      } catch {
+        // No cookie file yet; nothing to copy.
+      }
+    }, 10 * 60_000);
+    timer.unref();
+  }
   for (const s of stores) if (applySession(s.id)) log(`${s.id}: using the login saved on the account page`);
 
   if (process.env.GROCERY_ACCOUNT_HTTP && httpListen) {
@@ -73,8 +118,9 @@ try {
     await startAccountServer({
       host, port, db, vault, ownerId: owner.id, log,
       extraHosts: (process.env.GROCERY_ACCOUNT_HOSTS ?? '').split(','),
+      connectShufersal,
       onSessionChange: (storeId) => {
-        applySession(storeId);
+        applySession(storeId, { disconnected: true });
         void stores.find((s) => s.id === storeId)?.close();
         log(`${storeId}: login changed on the account page; the adapter restarts on its next call`);
       },

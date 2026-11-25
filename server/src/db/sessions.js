@@ -18,6 +18,12 @@ export function saveSession(db, vault, accountId, session, { expiresAt = null, n
   if (!changes) throw new StoreError(`no store account ${accountId}`, 'NOT_FOUND');
 }
 
+/** Replaces the stored session (for example cookies the store renewed) without changing its status or last check. */
+export function refreshSession(db, vault, accountId, session, { now = Date.now() } = {}) {
+  db.prepare('UPDATE store_accounts SET session_enc = ?, updated_at = ? WHERE id = ? AND session_enc IS NOT NULL')
+    .run(vault.seal(JSON.stringify(session), context(accountId)), nowIso(now), accountId);
+}
+
 /** The session object, or null when the account has none. */
 export function loadSession(db, vault, accountId) {
   const row = db.prepare('SELECT session_enc FROM store_accounts WHERE id = ?').get(accountId);

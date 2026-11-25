@@ -60,7 +60,7 @@ Back the key up somewhere safe: without it, the encrypted values cannot be read.
 
 ## Account page
 
-Set `GROCERY_ACCOUNT_HTTP` to the server's tailnet address and a port, such as `100.x.y.z:8795`, to get a page for your profile, delivery address and store logins. A Rami Levy login pasted there replaces the token script. See [server/README.md](server/README.md#account-page). From a computer that is not on the tailnet, use an SSH tunnel:
+Set `GROCERY_ACCOUNT_HTTP` to the server's tailnet address and a port, such as `100.x.y.z:8795`, to get a page for your profile, delivery address and store logins. A Rami Levy login pasted there replaces the token script, and Shufersal can be connected with its password, used once and not stored. See [server/README.md](server/README.md#account-page). From a computer that is not on the tailnet, use an SSH tunnel:
 
 ```sh
 ssh -N -L 8795:<tailnet address>:8795 <server>

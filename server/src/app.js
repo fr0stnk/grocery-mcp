@@ -29,10 +29,14 @@ export function buildInstructions(stores, { readOnly }) {
 }
 
 /** Store tools as clients see them: prefixed name, store label, merged annotations. */
+/** Adapter tools only this server may call; a model must never be offered them (they take passwords). */
+export const HOST_ONLY_TOOLS = new Set(['login_with_password']);
+
 export function forwardedTools(stores, { readOnly }) {
   const routes = new Map();
   for (const store of stores) {
     for (const tool of store.tools ?? []) {
+      if (HOST_ONLY_TOOLS.has(tool.name)) continue;
       const annotations = { ...tool.annotations, ...store.annotations?.[tool.name] };
       if (readOnly && annotations.readOnlyHint !== true) continue;
       routes.set(store.exposedName(tool.name), {

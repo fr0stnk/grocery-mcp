@@ -4,6 +4,7 @@ import net from 'node:net';
 import { getAddress, getProfile, saveAddress, saveProfile } from '../db/profile.js';
 import { storeAccountsFor } from '../db/people.js';
 import { clearSession, effectiveStatus, saveSession } from '../db/sessions.js';
+import { StoreError } from '../normalize.js';
 import { ramiSessionFromCurl } from '../rami-curl.js';
 import { renderPage } from './pages.js';
 
@@ -45,7 +46,7 @@ function readForm(req) {
  * them. `ctx` holds the database, the vault, the owner and a hook to restart a
  * store's adapter after its session changes.
  */
-export function accountHandler({ db, vault, ownerId, hostAllow, onSessionChange = () => {}, log = () => {}, now = () => Date.now() }) {
+export function accountHandler({ db, vault, ownerId, hostAllow, onSessionChange = () => {}, connectShufersal = null, log = () => {}, now = () => Date.now() }) {
   const secret = crypto.randomBytes(32);
   const csrf = (form) => crypto.createHmac('sha256', secret).update(`csrf:${form}`).digest('base64url');
   const validCsrf = (form, token) => {
@@ -75,6 +76,17 @@ export function accountHandler({ db, vault, ownerId, hostAllow, onSessionChange 
       saveSession(db, vault, account.id, session, { expiresAt, now: now() });
       onSessionChange('rami-levy');
       return `Rami Levy connected${expiresAt ? `; the login lasts until ${expiresAt.slice(0, 10)}` : ''}.`;
+    },
+    'connect-shufersal': async (form) => {
+      const account = storeAccountsFor(db, ownerId).find((a) => a.store === 'shufersal' && a.role === 'owner');
+      if (!account || !connectShufersal) throw Object.assign(new Error('Shufersal is not configured on this server'), { status: 400 });
+      const username = String(form.username ?? '').trim();
+      if (!username || !form.password) throw new StoreError('enter the Shufersal email or ID and the password', 'INVALID_ARGUMENT');
+      // The password lives only in this request: it goes to the adapter's login and nowhere else.
+      const { session, expiresAt } = await connectShufersal(username, form.password);
+      saveSession(db, vault, account.id, session, { expiresAt, now: now() });
+      onSessionChange('shufersal');
+      return 'Shufersal connected. The password was used to log in and was not stored.';
     },
     disconnect: (form) => {
       const account = storeAccountsFor(db, ownerId).find((a) => a.id === form.account && a.role === 'owner');
@@ -115,7 +127,7 @@ export function accountHandler({ db, vault, ownerId, hostAllow, onSessionChange 
       const form = await readForm(req);
       if (!validCsrf(action, form.csrf)) return send(403, 'The form expired; reload the page and try again.', 'text/plain; charset=utf-8');
       try {
-        const message = actions[action](form);
+        const message = await actions[action](form);
         log(`account page: ${action} ok`);
         return send(200, view({ ok: true, message }));
       } catch (error) {
