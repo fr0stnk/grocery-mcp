@@ -216,7 +216,9 @@ export async function addBasketToCart(stores, args = {}, { cache = searchCache, 
       else if (!line || /^(added|would-add)$/.test(line.status ?? 'added')) out.push({ ...describe(c, 'added'), ...(line?.cartQuantity != null ? { cartQuantity: line.cartQuantity } : {}) });
       else out.push({ ...describe(c, 'rejected'), code: 'STORE_REJECTED', message: line.status });
     }
-    return { ...summary(store.id, false, out), storeSummary: body?.summary };
+    // The adapter's summary describes its own step only; after top-ups it would contradict the results ("Added 0 of 1").
+    const toppedUp = lines.some((l) => l.status === 'already-in-cart');
+    return { ...summary(store.id, false, out), ...(body?.summary && !toppedUp ? { storeSummary: body.summary } : {}) };
   }
 
   // Rami Levy adds the whole checked list with one cart sync.
