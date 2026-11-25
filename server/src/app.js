@@ -137,7 +137,9 @@ export function createGroceryServer(stores, { readOnly = false, log = () => {}, 
         void refreshMissingTools();
         return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
       } catch (error) {
-        return { isError: true, content: [{ type: 'text', text: error.message }] };
+        // Errors of our own tools carry a stable code the client can act on.
+        const body = { error: { code: error.code ?? 'INTERNAL_ERROR', message: error.message, retryable: Boolean(error.retryable) } };
+        return { isError: true, content: [{ type: 'text', text: JSON.stringify(body) }] };
       }
     }
 

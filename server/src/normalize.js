@@ -5,7 +5,14 @@
  * Prices are numbers in shekels. Missing data is null, never guessed.
  */
 
-export class StoreError extends Error {}
+/** An error the client can act on; `code` is stable, e.g. PRODUCT_NOT_FOUND or INVALID_ARGUMENT. */
+export class StoreError extends Error {
+  constructor(message, code = 'STORE_ERROR', { retryable = false } = {}) {
+    super(message);
+    this.code = code;
+    this.retryable = retryable;
+  }
+}
 
 // Longer spellings come first so "ליטר" is not read as "ל" followed by text.
 const UNITS = [
@@ -43,6 +50,29 @@ export function barcodeOf(value) {
   return /^(\d{8}|\d{12,14})$/.test(digits) ? digits : null;
 }
 
+/** True when the last digit of a GTIN is its correct GS1 check digit. */
+export function gs1Valid(code) {
+  if (!/^\d{8,14}$/.test(code)) return false;
+  const digits = [...code].map(Number);
+  const check = digits.pop();
+  const sum = digits.reverse().reduce((acc, d, i) => acc + d * (i % 2 === 0 ? 3 : 1), 0);
+  return (10 - (sum % 10)) % 10 === check;
+}
+
+/**
+ * Shufersal's barcode for a product code. Many Israeli products use 7-digit
+ * codes that are the tail of an EAN-13 beginning with 729000 (P_4131074 is
+ * 7290004131074). That barcode is inferred only when its check digit is valid,
+ * and the result says so.
+ */
+export function shufersalBarcode(code) {
+  const digits = String(code ?? '').trim().replace(/^P_/i, '');
+  const direct = barcodeOf(digits);
+  if (direct) return { barcode: direct, inferred: false };
+  if (/^\d{7}$/.test(digits) && gs1Valid(`729000${digits}`)) return { barcode: `729000${digits}`, inferred: true };
+  return { barcode: null, inferred: false };
+}
+
 export function parsePrice(value) {
   if (typeof value === 'number') return Number.isFinite(value) ? value : null;
   if (typeof value !== 'string') return null;
@@ -55,7 +85,11 @@ function round(n, digits = 2) {
   return Math.round(n * f) / f;
 }
 
-function item(store, { productId, barcode = null, name, brand = null, sizeText, price, inStock = null, byWeight = false, pricedPerKg = false, promotions = [] }) {
+/**
+ * priceBasis says what `price` buys: one item ("unit"), one kilogram ("kg"), or
+ * one package whose final charge depends on its weight ("package", estimated).
+ */
+function item(store, { productId, barcode = null, barcodeInferred = false, name, brand = null, sizeText, price, inStock = null, byWeight = false, pricedPerKg = false, priceBasis, promotions = [] }) {
   const p = parsePrice(price);
   // A weighed item's price is per kilogram when the store says so; otherwise
   // it is not tied to the pack size, so no unit price is derived.
@@ -64,14 +98,18 @@ function item(store, { productId, barcode = null, name, brand = null, sizeText, 
   let perUnit = null;
   if (byWeight && pricedPerKg && p != null) [unitPrice, perUnit] = [p, 'kg'];
   else if (size && p != null) [unitPrice, perUnit] = [round(p / size.amount), size.unit];
+  const basis = priceBasis ?? (!byWeight ? 'unit' : pricedPerKg ? 'kg' : 'package');
   return {
     store,
     productId: String(productId),
     barcode,
+    ...(barcodeInferred ? { barcodeInferred: true } : {}),
     name: name ?? '',
     brand: brand || null,
     size: size?.label ?? null,
     price: p,
+    priceBasis: basis,
+    ...(basis === 'package' ? { priceEstimated: true } : {}),
     pricePerUnit: unitPrice,
     perUnit,
     inStock,
@@ -95,7 +133,7 @@ export function normalizeShufersal(text) {
   return data.map((p) =>
     item('shufersal', {
       productId: p.code,
-      barcode: barcodeOf(p.code),
+      ...(({ barcode, inferred }) => ({ barcode, barcodeInferred: inferred }))(shufersalBarcode(p.code)),
       name: p.name,
       brand: p.brand,
       sizeText: p.unit,
@@ -170,19 +208,27 @@ export function normalizeShufersalRaw(results) {
     .map((p) => {
       const method = typeof p.sellingMethod === 'string' ? p.sellingMethod : p.sellingMethod?.code;
       const stock = p.stock?.stockLevelStatus?.code;
+      const official = officialUnitPrice(p);
+      const price = p.price?.value;
+      // A weighed item is priced per kilogram when Shufersal's own per-kg comparison price equals its price.
+      const perKg = method === 'BY_WEIGHT' && official?.perUnit === 'kg' && Math.abs(official.pricePerUnit - Number(price)) < 0.01;
+      const code = shufersalBarcode(p.ean ?? p.sku ?? p.code);
       const normalized = item('shufersal', {
         productId: p.code,
-        barcode: barcodeOf(p.ean ?? p.sku ?? p.code),
+        barcode: code.barcode,
+        barcodeInferred: code.inferred,
         name: p.name,
         brand: p.brandName,
         sizeText: p.unitDescription,
-        price: p.price?.value,
+        price,
         inStock: stock ? stock !== 'outOfStock' : null,
         byWeight: Boolean(method) && method !== 'BY_UNIT',
+        pricedPerKg: perKg,
         promotions: parseShufersalPromotion(p.promotionMsg),
       });
-      // When the size cannot be read from the text, use the store's own comparison price.
-      if (normalized.pricePerUnit == null && !normalized.soldByWeight) Object.assign(normalized, officialUnitPrice(p) ?? {});
+      // When no unit price could be derived, use Shufersal's own comparison price
+      // (for packaged produce this is per kilogram).
+      if (normalized.pricePerUnit == null && official) Object.assign(normalized, official);
       return normalized;
     });
 }

@@ -188,6 +188,10 @@ test('preferences drive compare_basket and add_basket_to_cart previews over HTTP
   const preview = await call('add_basket_to_cart', { store: 'shufersal', items: [{ productId: offer.productId, quantity: 2 }], dry_run: true });
   assert.deepEqual([preview.store, preview.dryRun, preview.requested], ['shufersal', true, 1]);
   assert.deepEqual(await call('remove_preference', { name: 'milk' }), { removed: 'Milk' });
+
+  const missing = await client.callTool({ name: 'compare_basket', arguments: { items: [{ preference: 'tea' }] } });
+  assert.equal(missing.isError, true);
+  assert.deepEqual(JSON.parse(missing.content[0].text), { error: { code: 'NOT_FOUND', message: 'item 1: no saved preference named "tea"', retryable: false } });
 });
 
 test('account_status runs live checks and search results carry account warnings', async () => {

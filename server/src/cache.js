@@ -43,6 +43,16 @@ export class SearchCache {
     this.entries.clear();
   }
 
+  /** The first item, in any fresh cached result list, that satisfies `match`. */
+  findFresh(match) {
+    for (const entry of this.entries.values()) {
+      if (this.now() - entry.at >= this.ttlMs || !Array.isArray(entry.value)) continue;
+      const found = entry.value.find(match);
+      if (found) return { item: found, fetchedAt: new Date(entry.at).toISOString() };
+    }
+    return null;
+  }
+
   #set(key, value) {
     this.entries.delete(key);
     this.entries.set(key, { value, at: this.now() });

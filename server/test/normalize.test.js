@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { barcodeOf, compareItems, normalizeRamiCatalog, normalizeRamiLevy, normalizeShufersal, parsePrice, parsePromotions, parseSize, StoreError } from '../src/normalize.js';
+import { barcodeOf, gs1Valid, shufersalBarcode, compareItems, normalizeRamiCatalog, normalizeRamiLevy, normalizeShufersal, parsePrice, parsePromotions, parseSize, StoreError } from '../src/normalize.js';
 import { groupByBarcode } from '../src/search.js';
 
 test('parseSize reads the sizes seen in live results', () => {
@@ -44,7 +44,7 @@ test('normalizeShufersal maps the live search shape', () => {
   const [milk, tomatoes] = normalizeShufersal(text);
   assert.deepEqual(milk, {
     store: 'shufersal', productId: 'P_7290102398065', barcode: '7290102398065', name: 'חלב 3% בקרטון מהדרין', brand: 'טרה',
-    size: '2 L', price: 14.7, pricePerUnit: 7.35, perUnit: 'L', inStock: true,
+    size: '2 L', price: 14.7, priceBasis: 'unit', pricePerUnit: 7.35, perUnit: 'L', inStock: true,
   });
   assert.equal(tomatoes.brand, null);
   assert.equal(tomatoes.pricePerUnit, null);
@@ -56,7 +56,7 @@ test('normalizeRamiLevy maps results and surfaces adapter errors', () => {
   const ok = JSON.stringify({ ok: true, results: [{ productId: '3025', name: "חלב תנובה 3% שומן 1 ל' קרטון בד\"צ", price: 7.2 }] });
   assert.deepEqual(normalizeRamiLevy(ok), [{
     store: 'rami-levy', productId: '3025', barcode: null, name: "חלב תנובה 3% שומן 1 ל' קרטון בד\"צ", brand: null,
-    size: '1 L', price: 7.2, pricePerUnit: 7.2, perUnit: 'L', inStock: null,
+    size: '1 L', price: 7.2, priceBasis: 'unit', pricePerUnit: 7.2, perUnit: 'L', inStock: null,
   }]);
   assert.throws(() => normalizeRamiLevy(JSON.stringify({ ok: false, error: 'auth_expired' })), (e) => e instanceof StoreError && /auth_expired/.test(e.message));
   assert.throws(() => normalizeRamiLevy('<html>'), StoreError);
@@ -120,6 +120,7 @@ test('groupByBarcode pairs the same product across stores', () => {
   assert.equal(groups.length, 1);
   assert.deepEqual(groups[0], {
     barcode: '7290102398065',
+    confidence: 'exact',
     name: 'חלב 3% בקרטון מהדרין',
     offers: [
       { store: 'shufersal', productId: 'P_7290102398065', price: 14.7 },
@@ -128,4 +129,26 @@ test('groupByBarcode pairs the same product across stores', () => {
     cheapestStore: 'shufersal',
     priceDifference: 0.2,
   });
+});
+
+test('gs1Valid checks GTIN check digits', () => {
+  for (const ok of ['7290004131074', '7290003996018', '7290102398065', '96385074', '036000291452']) assert.equal(gs1Valid(ok), true, ok);
+  for (const bad of ['7290004131075', '7290102398060', '123', 'abcdefgh']) assert.equal(gs1Valid(bad), false, bad);
+});
+
+test('shufersalBarcode infers 729000 barcodes only when the check digit is valid', () => {
+  assert.deepEqual(shufersalBarcode('P_4131074'), { barcode: '7290004131074', inferred: true });
+  assert.deepEqual(shufersalBarcode('P_7290102398065'), { barcode: '7290102398065', inferred: false });
+  assert.deepEqual(shufersalBarcode('P_1234567'), { barcode: null, inferred: false });
+  assert.deepEqual(shufersalBarcode('P_7296073409441_42'), { barcode: null, inferred: false });
+  const [milk] = normalizeShufersal(JSON.stringify([{ code: 'P_4131074', name: 'חלב', unit: '1 ליטר', price: '7.35 ₪', sellingMethod: 'BY_UNIT' }]));
+  assert.deepEqual([milk.barcode, milk.barcodeInferred], ['7290004131074', true]);
+});
+
+test('groupByBarcode marks pairs that rely on an inferred barcode', () => {
+  const [group] = groupByBarcode([
+    { store: 'shufersal', productId: 'P_4131074', barcode: '7290004131074', barcodeInferred: true, name: 'חלב', price: 7.35 },
+    { store: 'rami-levy', productId: '3025', barcode: '7290004131074', name: 'חלב', price: 7.2 },
+  ]);
+  assert.deepEqual([group.confidence, group.cheapestStore], ['inferred', 'rami-levy']);
 });

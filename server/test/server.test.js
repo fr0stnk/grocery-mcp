@@ -96,7 +96,7 @@ test('the grocery server forwards store tools and merges search', async () => {
   const cart = await client.callTool({ name: 'rami_levy_view_cart', arguments: {} });
   assert.equal(JSON.parse(cart.content[0].text).tool, 'rami_levy_view_cart');
 
-  const search = JSON.parse((await client.callTool({ name: 'search_all_stores', arguments: { query: 'חלב' } })).content[0].text);
+  const search = JSON.parse((await client.callTool({ name: 'search_all_stores', arguments: { query: 'חלב', sortBy: 'unitPrice' } })).content[0].text);
   assert.deepEqual(Object.fromEntries(Object.entries(search.stores).map(([k, v]) => [k, [v.ok, v.count]])), { shufersal: [true, 1], 'rami-levy': [true, 1] });
   assert.deepEqual(search.results.map((r) => [r.store, r.pricePerUnit]), [['rami-levy', 7.1], ['shufersal', 7.35]]);
 

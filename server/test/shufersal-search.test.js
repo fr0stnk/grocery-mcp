@@ -79,10 +79,10 @@ test('normalizeShufersalRaw keeps barcode, stock, brand, size and promotions', (
   ]);
   assert.deepEqual(pasta, {
     store: 'shufersal', productId: 'P_7296073011224', barcode: '7296073011224', name: 'פסטה פוסילי', brand: 'MORINI',
-    size: '0.5 kg', price: 7.9, pricePerUnit: 15.8, perUnit: 'kg', inStock: true,
+    size: '0.5 kg', price: 7.9, priceBasis: 'unit', pricePerUnit: 15.8, perUnit: 'kg', inStock: true,
     promotions: [{ text: "3 יח' ב- 15 ₪", quantity: 3, price: 15, unitPrice: 5, until: null, clubOnly: false, personal: false }],
   });
-  assert.deepEqual([tomatoes.soldByWeight, tomatoes.pricePerUnit, tomatoes.inStock], [true, null, true]);
+  assert.deepEqual([tomatoes.soldByWeight, tomatoes.priceBasis, tomatoes.priceEstimated, tomatoes.pricePerUnit, tomatoes.perUnit, tomatoes.inStock], [true, 'package', true, 8.9, 'kg', true]);
   assert.deepEqual([missing.inStock, missing.barcode], [false, null]);
   assert.deepEqual([noSize.size, noSize.pricePerUnit, noSize.perUnit], [null, 15.8, 'kg'], 'the store comparison price fills in');
   assert.throws(() => normalizeShufersalRaw({}), /no results array/);
@@ -118,4 +118,12 @@ test('the configured Shufersal search reads directly and falls back to the adapt
   assert.deepEqual(await store.search.run({ query: 'פסטה', limit: 5, fallback }), ['from adapter']);
   assert.equal(fallbacks, 1);
   assert.equal(createStores({ ...env, GROCERY_SHUFERSAL_SEARCH: 'adapter' })[0].search.run, undefined);
+});
+
+test('weighed Shufersal items are priced per kilogram when Shufersal says so', () => {
+  const SALMON = { code: 'P_939995', sku: '939995', name: 'פילה סלמון קפוא', unitDescription: 'מחיר לפי משקל', sellingMethod: { code: 'BY_WEIGHT' },
+    price: { value: 69.9 }, pricePerUnit: { value: 69.9 }, valueForComparison: 1, unitForComparison: 'ק"ג', stock: { stockLevelStatus: { code: 'inStock' } } };
+  const [salmon, unclear] = normalizeShufersalRaw([SALMON, { ...SALMON, code: 'P_2', pricePerUnit: { value: 50 } }]);
+  assert.deepEqual([salmon.priceBasis, salmon.pricePerUnit, salmon.perUnit, salmon.soldByWeight, salmon.priceEstimated], ['kg', 69.9, 'kg', true, undefined]);
+  assert.deepEqual([unclear.priceBasis, unclear.priceEstimated, unclear.pricePerUnit], ['package', true, 50]);
 });

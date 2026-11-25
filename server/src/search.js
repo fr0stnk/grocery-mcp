@@ -12,8 +12,9 @@ export const SEARCH_TOOL = {
   title: 'Search all stores',
   description:
     'Search Shufersal and Rami Levy at once. The catalogs are in Hebrew: use Hebrew requests as written, and translate Russian or English ones ' +
-    'into a Hebrew query first (молоко / milk → חלב). Retry with a simpler Hebrew term if nothing is found. Returns one list sorted by price per liter or kilogram, ' +
-    'then price, with per-store status. A store that fails is reported in `stores` and the other store still answers. ' +
+    'into a Hebrew query first (молоко / milk → חלב). Retry with a simpler Hebrew term if nothing is found. Returns one list in each store\'s own ' +
+    'relevance order, interleaved by rank (sortBy unitPrice or price for cheapest first), with per-store status. ' +
+    'priceBasis says what price buys: unit, kg, or an estimated package. A store that fails is reported in `stores` and the other store still answers. ' +
     'Items with the same barcode in different stores are the same product and are grouped in `sameProduct` with the cheapest store; ' +
     'compare other items by name, size and pricePerUnit and say which you treat as equivalent. ' +
     '`promotions` lists multi-buy and club offers (unitPrice is the price per item under the offer); mention them when they change which store is cheaper. ' +
@@ -24,6 +25,7 @@ export const SEARCH_TOOL = {
     properties: {
       query: { type: 'string', minLength: 1, description: 'Hebrew search terms, e.g. "חלב 3%". Translate Russian or English requests; use Hebrew as written.' },
       limit: { type: 'integer', minimum: 1, maximum: 20, default: 10, description: 'Maximum results per store' },
+      sortBy: { type: 'string', enum: ['relevance', 'unitPrice', 'price'], default: 'relevance', description: 'relevance keeps each store\'s ranking; unitPrice sorts by price per liter or kilogram' },
       stores: {
         type: 'array',
         items: { type: 'string', enum: ['shufersal', 'rami-levy'] },
@@ -78,16 +80,17 @@ export function storeStatus(hit, count) {
 export function selectStores(stores, wantedIds) {
   const wanted = Array.isArray(wantedIds) && wantedIds.length ? new Set(wantedIds) : null;
   const selected = wanted ? stores.filter((s) => wanted.has(s.id)) : stores;
-  if (!selected.length) throw new StoreError(`No configured store matches ${JSON.stringify(wantedIds)}`);
+  if (!selected.length) throw new StoreError(`No configured store matches ${JSON.stringify(wantedIds)}`, 'INVALID_ARGUMENT');
   return selected;
 }
 
 export async function searchAllStores(stores, args = {}, { timeoutMs = 45_000, cache = searchCache } = {}) {
   const query = typeof args.query === 'string' ? args.query.trim() : '';
-  if (!query) throw new StoreError('query is required');
+  if (!query) throw new StoreError('query is required', 'INVALID_ARGUMENT');
   const limit = Number.isInteger(args.limit) ? Math.min(Math.max(args.limit, 1), 20) : 10;
   const selected = selectStores(stores, args.stores);
 
+  const sortBy = ['relevance', 'unitPrice', 'price'].includes(args.sortBy) ? args.sortBy : 'relevance';
   const outcomes = await Promise.allSettled(selected.map((store) => searchStore(store, query, { timeoutMs, cache })));
 
   const status = {};
@@ -95,7 +98,7 @@ export async function searchAllStores(stores, args = {}, { timeoutMs = 45_000, c
   outcomes.forEach((outcome, i) => {
     const store = selected[i];
     if (outcome.status === 'fulfilled') {
-      const items = outcome.value.value.slice(0, limit);
+      const items = outcome.value.value.slice(0, limit).map((item, index) => ({ ...item, rank: index + 1 }));
       status[store.id] = storeStatus(outcome.value, items.length);
       results.push(...items);
     } else {
@@ -103,8 +106,15 @@ export async function searchAllStores(stores, args = {}, { timeoutMs = 45_000, c
       status[store.id] = { ok: false, error: reason };
     }
   });
-  results.sort(compareItems);
-  return { query, stores: status, sameProduct: groupByBarcode(results), results };
+  // Array.prototype.sort is stable, so equal ranks keep the stores' order.
+  if (sortBy === 'unitPrice') results.sort(compareItems);
+  else if (sortBy === 'price') results.sort((a, b) => (a.price ?? Infinity) - (b.price ?? Infinity));
+  else results.sort((a, b) => a.rank - b.rank);
+  // The catalogs are Hebrew; a Latin or Cyrillic query usually finds nothing useful.
+  const hint = /[\u0590-\u05FF]/.test(query) || /^\d+$/.test(query)
+    ? undefined
+    : 'The store catalogs are in Hebrew and this query has no Hebrew letters; translate it to Hebrew (for example молоко or milk → חלב) and search again.';
+  return { query, sortBy, ...(hint ? { hint } : {}), stores: status, sameProduct: groupByBarcode(results), results };
 }
 
 /** Products sold by more than one store, matched by barcode, cheapest first within each group. */
@@ -122,6 +132,7 @@ export function groupByBarcode(results) {
       const [cheapest, ...rest] = offers;
       return {
         barcode: cheapest.barcode,
+        confidence: offers.some((o) => o.barcodeInferred) ? 'inferred' : 'exact',
         name: offers.find((o) => o.store === 'shufersal')?.name ?? cheapest.name,
         offers: offers.map((o) => ({
           store: o.store,

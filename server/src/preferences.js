@@ -15,8 +15,8 @@ const keyOf = (name) => name.trim().toLocaleLowerCase();
 
 function text(value, field, max) {
   if (value == null || value === '') return undefined;
-  if (typeof value !== 'string' || !value.trim()) throw new StoreError(`${field} must be text`);
-  if (value.trim().length > max) throw new StoreError(`${field} is longer than ${max} characters`);
+  if (typeof value !== 'string' || !value.trim()) throw new StoreError(`${field} must be text`, 'INVALID_ARGUMENT');
+  if (value.trim().length > max) throw new StoreError(`${field} is longer than ${max} characters`, 'INVALID_ARGUMENT');
   return value.trim();
 }
 
@@ -36,7 +36,7 @@ export class PreferenceStore {
       return data && typeof data.items === 'object' ? data : { version: 1, items: {} };
     } catch (error) {
       if (error.code === 'ENOENT') return { version: 1, items: {} };
-      throw new StoreError(`preferences file is unreadable: ${error.message}`);
+      throw new StoreError(`preferences file is unreadable: ${error.message}`, 'STORAGE_ERROR', { retryable: true });
     }
   }
 
@@ -59,20 +59,20 @@ export class PreferenceStore {
   /** Creates or updates one preference; omitted fields keep their saved values. */
   save(input = {}) {
     const name = text(input.name, 'name', 60);
-    if (!name) throw new StoreError('name is required');
+    if (!name) throw new StoreError('name is required', 'INVALID_ARGUMENT');
     const data = this.#read();
     const existing = data.items[keyOf(name)] ?? {};
-    if (!existing.name && Object.keys(data.items).length >= MAX_PREFERENCES) throw new StoreError(`at most ${MAX_PREFERENCES} preferences`);
+    if (!existing.name && Object.keys(data.items).length >= MAX_PREFERENCES) throw new StoreError(`at most ${MAX_PREFERENCES} preferences`, 'INVALID_ARGUMENT');
 
     let barcode = existing.barcode;
     if (input.barcode !== undefined) {
       barcode = input.barcode === null || input.barcode === '' ? undefined : barcodeOf(input.barcode);
-      if (input.barcode && !barcode) throw new StoreError(`${input.barcode} is not a retail barcode`);
+      if (input.barcode && !barcode) throw new StoreError(`${input.barcode} is not a retail barcode`, 'INVALID_ARGUMENT');
     }
     const query = input.query !== undefined ? text(input.query, 'query', 100) : existing.query;
-    if (!query && !barcode) throw new StoreError('give a Hebrew search query, a barcode, or both');
+    if (!query && !barcode) throw new StoreError('give a Hebrew search query, a barcode, or both', 'INVALID_ARGUMENT');
     const quantity = input.quantity !== undefined ? Number(input.quantity) : existing.quantity ?? 1;
-    if (!(quantity > 0 && quantity <= 100)) throw new StoreError('quantity must be above 0 and at most 100');
+    if (!(quantity > 0 && quantity <= 100)) throw new StoreError('quantity must be above 0 and at most 100', 'INVALID_ARGUMENT');
     const note = input.note !== undefined ? text(input.note, 'note', 200) : existing.note;
 
     const preference = {
@@ -93,7 +93,7 @@ export class PreferenceStore {
     const key = typeof name === 'string' ? keyOf(name) : '';
     const data = this.#read();
     const existing = key ? data.items[key] : null;
-    if (!existing) throw new StoreError(`no preference named ${JSON.stringify(name)}`);
+    if (!existing) throw new StoreError(`no preference named ${JSON.stringify(name)}`, 'NOT_FOUND');
     delete data.items[key];
     this.#write(data);
     return { removed: existing.name };
@@ -151,5 +151,5 @@ export function runPreferenceTool(store, name, args = {}) {
   if (name === 'list_preferences') return { preferences: store.list() };
   if (name === 'save_preference') return store.save(args);
   if (name === 'remove_preference') return store.remove(args.name);
-  throw new StoreError(`unknown preference tool ${name}`);
+  throw new StoreError(`unknown preference tool ${name}`, 'INVALID_ARGUMENT');
 }

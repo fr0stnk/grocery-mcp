@@ -19,6 +19,7 @@ This tool searches every configured store in parallel.
 |---|---|---|---|
 | `query` | string | required | What to search for. Hebrew works best, for example `חלב 3%`. |
 | `limit` | integer, 1–20 | 10 | Maximum results per store |
+| `sortBy` | `relevance`, `unitPrice`, `price` | `relevance` | `relevance` keeps each store's own ranking, interleaved by rank. The others put the cheapest first. |
 | `stores` | array of `shufersal`, `rami-levy` | all configured | Search only these stores |
 
 It returns JSON text like this:
@@ -59,9 +60,12 @@ It returns JSON text like this:
 }
 ```
 
-- Results are sorted by `pricePerUnit`, then by `price`. Items without a unit price come last.
+- By default the results keep each store's relevance order, interleaved by `rank`. Sorting by unit price would put a cheap but irrelevant match first. With `sortBy: "unitPrice"` they are sorted by `pricePerUnit`, then `price`, and items without a unit price come last.
+- `priceBasis` says what `price` buys: `unit`, `kg`, or `package`, which is packaged produce charged by actual weight and marked `priceEstimated: true`. Shufersal's weighed items are `kg` when Shufersal's own per-kg comparison price equals the price.
+- A query without Hebrew letters that is not a barcode gets a `hint` to translate it, because both catalogs are Hebrew.
 - `size` is read from Shufersal's unit field, or else from the product name, for example `2 ליטר`, `1 ל'`, `6*200 מ"ל` or `500 גרם`. It is always shown in liters or kilograms. `null` means the size could not be read, and no value is guessed.
 - `barcode` is the retail barcode (EAN-8, UPC-A, EAN-13 or GTIN-14). Shufersal's `P_<digits>` codes and Rami Levy's catalog both carry it. Internal codes, such as produce PLUs, give `null`.
+- Many Shufersal codes have 7 digits, which are the tail of an EAN-13 starting with `729000`: `P_4131074` is `7290004131074`. That barcode is inferred only when its GS1 check digit is valid, and is marked `barcodeInferred: true`. `sameProduct` groups and basket matches that rely on it report `confidence: "inferred"` instead of `"exact"`.
 - `sameProduct` groups items with the same barcode in more than one store. Each group lists the offers cheapest first, with `cheapestStore` (or `null` on a tie) and `priceDifference`. Groups are sorted by the largest difference first. Other items are not matched, and the server instructions ask the client to compare them by name, size and unit price.
 - `promotions` appears on items with offers from either store. Rami Levy's come from its catalog's `sale` records. Shufersal's come from its `promotionMsg` text, such as `3 יח' ב- 15 ₪`; multi-buy wording is parsed into quantity and price, and other wording is kept as `text` only. Each one has `text`, `quantity` and `price` (for example 4 for ₪10), a per-item `unitPrice` under the offer, the `until` date, and `clubOnly` and `personal` flags.
 - Items sold by weight carry `"soldByWeight": true`. Rami Levy prices them per kilogram, so their `pricePerUnit` is that price per `kg`. Shufersal's weighed items have no unit price, because the meaning of their price is not confirmed.
@@ -104,11 +108,19 @@ This tool adds several products to **one** store's real cart in a single call, u
 | Argument | Meaning |
 |---|---|
 | `store` | `shufersal` or `rami-levy` |
-| `items` | 1–60 of `{ productId, quantity, name?, price? }`. For Rami Levy, `name` and `price` are required and are taken from the offer as returned. |
+| `items` | 1–60 of `{ productId, quantity, name?, price? }`. `name` and `price` are only used for Rami Levy products that are not in recent search results. |
 | `dry_run` | Preview only; the cart is not changed |
 
-- **Shufersal:** one call to the adapter's bulk `add_to_cart`, which also handles `dry_run`. It takes only whole units, so weighed items are added in Shufersal's app.
-- **Rami Levy:** one `rami_levy_add_item` per product. Each call syncs the whole cart, and quantities are added to what is already there. The tool reports each item's result. After 90 seconds it stops starting new adds and reports the rest as not attempted, which keeps it inside the OpenAI tunnel's 120-second limit.
+- **The server checks every product before anything is added, and a dry run uses exactly the same checks.** Each product is looked up in fresh search results (up to 15 minutes old), or else with a live search by its code. Rejected items get a stable code:
+  - `PRODUCT_NOT_FOUND` for an unknown product,
+  - `OUT_OF_STOCK`, including Rami Levy items not sold at the branch,
+  - `UNSUPPORTED_SELLING_METHOD` for Shufersal items sold by weight or package, which are added in Shufersal's app,
+  - `UNSUPPORTED_PRODUCT_ID` for Shufersal codes with a suffix, which the adapter cannot take yet,
+  - `INVALID_QUANTITY` for a fractional quantity of an item sold by unit,
+  - `MISSING_OFFER_DETAILS` for a Rami Levy product the server has not seen and no name or price was given.
+- Every result line has a `status` (`added`, `would-add` or `rejected`). The summary counts `requested`, `accepted`, `rejected` and `added`, and `complete` is true only when every line went through.
+- **Shufersal:** only the checked items go to the adapter's bulk `add_to_cart`, in one call. The adapter's per-line outcome is reported back.
+- **Rami Levy:** the name and price come from the server's own search results, not from the request (`priceSource: "server"`). A request price that differs is reported as `priceChanged`. Products the server has not seen use the request's values and are marked `priceSource: "client"`. Then one `rami_levy_add_item` runs per product. Each call syncs the whole cart, and quantities are added to what is already there. The tool reports each item's result. After 90 seconds it stops starting new adds and reports the rest as not attempted, which keeps it inside the OpenAI tunnel's 120-second limit.
 - Nothing is ordered or paid. Checkout happens in the store's app or site.
 
 ### `server_info` and version reporting
@@ -193,6 +205,24 @@ ssh -T <server> 'docker exec -i grocery-mcp-grocery-http-1 node src/bridge.js'
 ```
 
 The bridge connects to `GROCERY_BRIDGE_URL` (default `http://127.0.0.1:8791/mcp`), which is the server inside the same container. When the server cannot be reached, each request gets a JSON-RPC error instead of hanging. The bridge exits when the client closes stdin.
+
+## Errors
+
+Errors from the server's own tools are JSON with a stable code:
+
+```json
+{ "error": { "code": "NOT_FOUND", "message": "item 1: no saved preference named \"tea\"", "retryable": false } }
+```
+
+The codes are:
+
+- `INVALID_ARGUMENT` and `INVALID_QUANTITY` for bad input,
+- `NOT_FOUND` for an unknown preference,
+- `STORE_UNAVAILABLE` and `STORE_ERROR` for a store problem,
+- `STORAGE_ERROR` for an unreadable preferences file, which can be retried,
+- the per-item codes of `add_basket_to_cart`, listed above.
+
+Tools forwarded from the store adapters keep the adapters' own messages.
 
 ## Startup and failures
 

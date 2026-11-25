@@ -103,6 +103,9 @@ function offer(match, quantity) {
     barcode: match.barcode,
     name: match.name,
     price: match.price,
+    priceBasis: match.priceBasis ?? 'unit',
+    ...(match.priceEstimated ? { priceEstimated: true } : {}),
+    ...(match.barcodeInferred ? { barcodeInferred: true } : {}),
     ...(match.size ? { size: match.size } : {}),
     ...lineCost(match, quantity),
     ...(clubOffer ? { clubOffer } : {}),
@@ -126,18 +129,18 @@ export function resolveItems(args, preferences) {
   const requested = Array.isArray(args.items) ? [...args.items] : [];
   if (args.usual) {
     const usual = (preferences?.list() ?? []).filter((p) => p.usual);
-    if (!usual.length) throw new StoreError('no saved preference is marked usual');
+    if (!usual.length) throw new StoreError('no saved preference is marked usual', 'NOT_FOUND');
     const named = new Set(requested.map((it) => it?.preference?.trim().toLocaleLowerCase()).filter(Boolean));
     for (const p of usual) if (!named.has(p.name.toLocaleLowerCase())) requested.push({ preference: p.name });
   }
-  if (!requested.length) throw new StoreError('items must be a non-empty list, or set usual: true');
-  if (requested.length > MAX_ITEMS) throw new StoreError(`at most ${MAX_ITEMS} items per basket`);
+  if (!requested.length) throw new StoreError('items must be a non-empty list, or set usual: true', 'INVALID_ARGUMENT');
+  if (requested.length > MAX_ITEMS) throw new StoreError(`at most ${MAX_ITEMS} items per basket`, 'INVALID_ARGUMENT');
   return requested.map((it, i) => {
     let { query, barcode, quantity } = it ?? {};
     let preference;
     if (it?.preference) {
       const saved = preferences?.get(it.preference);
-      if (!saved) throw new StoreError(`item ${i + 1}: no saved preference named ${JSON.stringify(it.preference)}`);
+      if (!saved) throw new StoreError(`item ${i + 1}: no saved preference named ${JSON.stringify(it.preference)}`, 'NOT_FOUND');
       preference = saved.name;
       barcode ??= saved.barcode;
       query ??= saved.query;
@@ -145,9 +148,9 @@ export function resolveItems(args, preferences) {
     }
     barcode = typeof barcode === 'string' && barcode.trim() ? barcode.trim() : undefined;
     query = barcode ?? (typeof query === 'string' ? query.trim() : '');
-    if (!query) throw new StoreError(`item ${i + 1} needs a query, a barcode or a preference`);
+    if (!query) throw new StoreError(`item ${i + 1} needs a query, a barcode or a preference`, 'INVALID_ARGUMENT');
     quantity = quantity == null ? 1 : Number(quantity);
-    if (!(quantity > 0 && quantity <= 100)) throw new StoreError(`item ${i + 1}: quantity must be above 0 and at most 100`);
+    if (!(quantity > 0 && quantity <= 100)) throw new StoreError(`item ${i + 1}: quantity must be above 0 and at most 100`, 'INVALID_QUANTITY');
     return { query, quantity, barcode, ...(preference ? { preference } : {}) };
   });
 }
@@ -198,6 +201,7 @@ export async function compareBasket(stores, args = {}, { timeoutMs = 45_000, cac
       quantity: it.quantity,
       ...(it.barcode ? { barcode: it.barcode } : {}),
       identical,
+      ...(identical ? { confidence: Object.values(offers).some((o) => o?.barcodeInferred) ? 'inferred' : 'exact' } : {}),
       cheapestStore: cheapest(offers),
       offers,
     };
