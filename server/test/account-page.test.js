@@ -141,3 +141,25 @@ test('Shufersal is connected with a password used once: only the cookie jar is s
   }
 });
 
+test('with a fixed secret, a form loaded before a restart still submits after it', async () => {
+  const { db, vault, owner } = await setup();
+  const csrfSecret = Buffer.alloc(32, 7);
+  const probe = await startAccountServer({ host: '127.0.0.1', port: 0, db, vault, ownerId: owner.id });
+  const port = probe.address().port;
+  probe.close();
+  const base = `http://127.0.0.1:${port}`;
+  const first = await startAccountServer({ host: '127.0.0.1', port, db, vault, ownerId: owner.id, csrfSecret });
+  const page = await (await fetch(`${base}/account`)).text();
+  first.close();
+  const csrf = /action="\/account\/address">\s*<input type="hidden" name="csrf" value="([^"]+)"/.exec(page)[1];
+  const second = await startAccountServer({ host: '127.0.0.1', port, db, vault, ownerId: owner.id, csrfSecret });
+  try {
+    const r = await fetch(`${base}/account/address`, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ csrf, city: 'חיפה', street: 'הנמל', houseNumber: '3', apartment: '1' }) });
+    assert.equal(r.status, 200);
+    assert.match(await r.text(), /Address saved/);
+  } finally {
+    second.close();
+    db.close();
+  }
+});
+

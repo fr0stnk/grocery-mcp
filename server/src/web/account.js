@@ -46,8 +46,9 @@ function readForm(req) {
  * them. `ctx` holds the database, the vault, the owner and a hook to restart a
  * store's adapter after its session changes.
  */
-export function accountHandler({ db, vault, ownerId, hostAllow, onSessionChange = () => {}, connectShufersal = null, log = () => {}, now = () => Date.now() }) {
-  const secret = crypto.randomBytes(32);
+export function accountHandler({ db, vault, ownerId, hostAllow, onSessionChange = () => {}, connectShufersal = null, csrfSecret = null, log = () => {}, now = () => Date.now() }) {
+  // A secret derived from the master key keeps open pages working across restarts; otherwise one per process.
+  const secret = csrfSecret ?? crypto.randomBytes(32);
   const csrf = (form) => crypto.createHmac('sha256', secret).update(`csrf:${form}`).digest('base64url');
   const validCsrf = (form, token) => {
     const expected = Buffer.from(csrf(form));

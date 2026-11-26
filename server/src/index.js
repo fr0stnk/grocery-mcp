@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
@@ -128,6 +129,7 @@ try {
       host, port, db, vault, ownerId: owner.id, log,
       extraHosts: (process.env.GROCERY_ACCOUNT_HOSTS ?? '').split(','),
       connectShufersal,
+      csrfSecret: process.env.GROCERY_MASTER_KEY ? crypto.createHmac('sha256', process.env.GROCERY_MASTER_KEY).update('grocery account page csrf v1').digest() : null,
       onSessionChange: (storeId) => {
         applySession(storeId, { disconnected: true });
         void stores.find((s) => s.id === storeId)?.close();
