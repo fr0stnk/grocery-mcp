@@ -104,15 +104,27 @@ Each offer's `lineTotal` is price × quantity. A fractional quantity means kilog
 The result contains:
 
 - `items`: each item's chosen offers per store, with `cheapestStore`. An item searched by barcode (a pinned barcode, a saved preference or a past-order line) is reported with `searchedBy: "barcode"` and its saved query, the preference name or the order line's name as `query`; the barcode itself is in `barcode`. A plural query whose only match in a store is a variant (cherry tomatoes for `עגבניות`) is searched again there in the singular, so the plain product (`עגבניה`, per kg) is preferred. The same retry runs without packaging words when no product matches every word: Rami Levy answers `בצל אדום ארוז` with onion rings, but `בצל אדום` with red onions. It is `null` for an item marked `notEquivalent`, because different amounts of different products have no cheaper store.
-- `totals`: each store's total, the number of items found and the `missing` queries.
+- `totals`: each store's total, the number of items found and the `missing` queries. Each store also carries `delivery` (`fee`, `minimumOrder`, `belowMinimum`, `source`) and `totalWithDelivery`. See [Delivery fees and minimum orders](#delivery-fees-and-minimum-orders).
 - `comparable`: totals over only the items every store has **like for like**, with `cheaperStore` and `difference`. This is the fair comparison. An item whose products differ in pack size (`0.5 kg vs 1 kg`), count (`18 vs 12 units`) or how they are sold (`kg vs unit`, `package vs unit`), whose prices are more than three times apart (`price 5.7× the other store's`; compared per kg, litre or piece when both have a unit price, so a bigger pack at the same price per kg is a size difference, `3.1 kg vs 1 kg`, not an outlier), or whose offer carries an `unrequested` variant, is marked `notEquivalent` and listed in `comparable.leftOut` with the reason. A price per kilogram, per item and per estimated package buy different amounts, so their bases must be the same. It still counts in each store's own total. Sizes that cannot be read on both sides are not treated as different.
 - Shufersal packaged produce (BY_PACKAGE with a weight range, such as tomatoes at 900–1100 g) is priced per kilogram, so it compares with Rami Levy's per-kg produce. The offer carries `packWeightKg` (the midpoint), `packPrice` and `packs`: the quantity in kg divided by the pack weight, rounded half up, at least one. `lineTotal` is packs × packPrice. Pass `packs` as the quantity to `add_basket_to_cart`.
 - A multipack is read as its total plus `packCount` and `itemSize`, whether written `6*1.5 ליטר` or `שישייה 1.5 ליטר`. A query for 1.5 L accepts it only when no single item fits, marked `unrequested` (`6×1.5 L`) on the offer and the item. The same six-pack in both stores is still `identical` and compared.
-- `overall`: the answer to "which store is cheaper". It adds to `comparable` the items whose products differ only in pack size or count, each compared by unit price at an equal amount (`items[].unitPriceComparison`: `perUnit`, `amount` and `amountLabel` (the smaller pack), `estimated: true`, each store's cost, `cheaperStore` and `difference`). It reports `itemsCompared` and `itemsInBasket`, each store's total, `cheaperStore`, `difference` and a `note` saying when unit-price lines are included and when less than half the basket could be compared. Items whose products are variants, price outliers or sold on different bases (kg vs unit) are not compared.
-- `split`: the total when every item is bought where it is cheapest, and `savingsOnCommonItems` against the cheapest single store. Items marked `notEquivalent` are left out and listed in `split.leftOut`.
-- `notes`: delivery fees and minimum orders are excluded, items with no Hebrew letters should be translated and compared again, weighed quantities are in kilograms, and some prices may be stale.
+- `overall`: the answer to "which store is cheaper". It adds to `comparable` the items whose products differ only in pack size or count, each compared by unit price at an equal amount (`items[].unitPriceComparison`: `perUnit`, `amount` and `amountLabel` (the smaller pack), `estimated: true`, each store's cost, `cheaperStore` and `difference`). It reports `itemsCompared` and `itemsInBasket`, each store's total, `cheaperStore`, `difference` and a `note` saying when unit-price lines are included and when less than half the basket could be compared. When the estimates overturn `comparable`'s cheaper store, `decidedByEstimates` lists those lines and the note gives the like-for-like verdict, so one wrong-product estimate cannot flip the answer unnoticed. Items whose products are variants, price outliers or sold on different bases (kg vs unit) are not compared.
+- `split`: the total when every item is bought where it is cheapest, and `savingsOnCommonItems` against the cheapest single store. Items marked `notEquivalent` are left out and listed in `split.leftOut`. `split.withDelivery` adds one fee for each store the split orders from (`total`, `deliveryFees`, `stores`), and a note says when that makes splitting dearer than one store.
+- `overall.withDelivery`: each store's `overall` figure plus its delivery fee, with `cheaperStore` and `difference`.
+- `notes`: club prices are excluded, a basket below a store's minimum order cannot be ordered there as it is, items with no Hebrew letters should be translated and compared again, weighed quantities are in kilograms, and some prices may be stale.
 
 A store that fails is reported in `stores`, and the other store is still priced.
+
+#### Delivery fees and minimum orders
+
+Delivery is one fee per order, added once to each store's total (`src/delivery.js`). Each store's `delivery.source` says where its figures come from:
+
+- `configured`: set in the environment (`GROCERY_SHUFERSAL_DELIVERY_FEE`, `GROCERY_RAMI_LEVY_MINIMUM_ORDER` and so on; see [Configuration](#configuration)). These always win.
+- `live`: Shufersal's fee is the cheapest open window in its delivery-slot list for the account's default address, read with the saved session and cached for an hour. A failed read is retried on the next basket.
+- `site`: Rami Levy shows its fee only in the response to a cart write, so its figures are the site's own (₪35.90 delivery, ₪50 minimum), with the date they were `checked`.
+- `unknown`: nothing gave a figure. The fee is `null`, the store's totals exclude delivery, and `overall.withDelivery` is left out.
+
+A past Shufersal order shows a single delivery line and no service fee, so none is added. If a service fee applies to an account, set `GROCERY_SHUFERSAL_SERVICE_FEE`. Shufersal shows no minimum order. `belowMinimum: true` means the store will not take the basket as it is.
 
 #### Pricing a past order
 
@@ -334,6 +346,9 @@ The adapters read their own variables, listed in the root `.env.example`. The se
 | `GROCERY_OWNER_EMAIL` | unset | Email recorded on the owner, the first person in the database |
 | `GROCERY_ACCOUNT_HTTP` | unset | `host:port` for the account page; loopback or a tailnet address only |
 | `GROCERY_ACCOUNT_HOSTS` | unset | Extra host names the account page answers to, comma-separated |
+| `GROCERY_SHUFERSAL_DELIVERY_FEE`, `GROCERY_RAMI_LEVY_DELIVERY_FEE` | live or the site's figure | Delivery fee per order in ₪, overriding what is read |
+| `GROCERY_SHUFERSAL_MINIMUM_ORDER`, `GROCERY_RAMI_LEVY_MINIMUM_ORDER` | none, ₪50 | Minimum order in ₪ |
+| `GROCERY_SHUFERSAL_SERVICE_FEE`, `GROCERY_RAMI_LEVY_SERVICE_FEE` | none | Service fee per order in ₪, added to the delivery fee |
 | `GROCERY_HISTORY_FILE` | `$GROCERY_DATA_DIR/price-history.db` | Price history file, used only when the database is unavailable, and by the tests |
 | `GROCERY_PRICE_HISTORY` | on | `off` stops recording prices and hides `price_history` |
 | `GROCERY_HTTP` | unset, which means stdio | Serve Streamable HTTP on `port` or `host:port`. The host defaults to `127.0.0.1`. |
@@ -388,6 +403,7 @@ The tests use stand-in adapters from `test/fixtures/`, so they need no credentia
 | `src/stores.js` | `StoreClient`: one adapter process, with startup, restart and stderr capture |
 | `src/search.js` | `search_all_stores`, per-store cached search and barcode grouping |
 | `src/basket.js` | `compare_basket`: match selection, promotion pricing and totals |
+| `src/delivery.js` | Delivery fees and minimum orders: configured, read live from Shufersal's slot list, or the store's published figures |
 | `src/match.js` | Word matching shared by search and baskets: query terms, unit words, abbreviations, unrequested variants and choosing the best candidates |
 | `src/accounts.js` | `account_status`, Rami Levy token expiry and remembered login failures |
 | `src/bridge.js` | stdio-to-HTTP relay for clients such as Claude Desktop |

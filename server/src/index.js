@@ -6,6 +6,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { AccountMonitor } from './accounts.js';
 import { createGroceryServer } from './app.js';
 import { createStores } from './config.js';
+import { createDelivery } from './delivery.js';
 import { PreferenceStore } from './preferences.js';
 import { bootstrap } from './db/bootstrap.js';
 import { databaseFile, openDatabase } from './db/database.js';
@@ -42,6 +43,7 @@ const stores = createStores();
 const STORE_ENV = { shufersal: { SHUFERSAL_PASSWORD_TOOL: '1' } };
 for (const s of stores) Object.assign(s.env, STORE_ENV[s.id] ?? {});
 const monitor = new AccountMonitor();
+const delivery = createDelivery(process.env);
 const historyOff = /^(0|false|no|off)$/i.test(process.env.GROCERY_PRICE_HISTORY ?? '');
 
 // The database holds people, store accounts, preferences, prices and the audit
@@ -161,11 +163,11 @@ process.on('SIGINT', () => void shutdown(130));
 process.on('SIGTERM', () => void shutdown(143));
 
 if (httpListen) {
-  await startHttpServer({ ...httpListen, makeServer: () => createGroceryServer(stores, { readOnly, log, preferences, monitor, history, audit }), log });
+  await startHttpServer({ ...httpListen, makeServer: () => createGroceryServer(stores, { readOnly, log, preferences, monitor, history, audit, delivery }), log });
   // Only the long-running server tracks prices; one-shot stdio runs just record what they search.
   if (history) startTracker({ preferences, stores, search: (store, q) => searchStore(store, q), log });
 } else {
-  const server = createGroceryServer(stores, { readOnly, log, preferences, monitor, history, audit });
+  const server = createGroceryServer(stores, { readOnly, log, preferences, monitor, history, audit, delivery });
   server.onclose = () => void shutdown(0);
   // The SDK's stdio transport does not close on end of input, and the child
   // adapters' pipes would keep this process alive after the client leaves.

@@ -16,7 +16,7 @@ export function buildInstructions(stores, { readOnly }) {
   return [
     'Grocery tools for two Israeli supermarkets: Shufersal and Rami Levy.',
     'Use search_all_stores to compare prices of one product type across stores. Identical products are matched by barcode in sameProduct; compare the rest by name, size and pricePerUnit, and say which items you treat as equivalent.',
-    'For a shopping list, use compare_basket with all items at once: it returns each store\'s total, missing items, a fair comparison over items both stores have, and the split total. Mention items where identical is false, and that delivery fees are not included. To order, show the chosen store\'s list and pass its offers to add_basket_to_cart in one call instead of adding items one by one.',
+    'For a shopping list, use compare_basket with all items at once: it returns each store\'s total, missing items, a fair comparison over items both stores have, and the split total. Mention items where identical is false. Quote totals with delivery (totalWithDelivery, overall.withDelivery), and say when a store\'s basket is below its minimum order. To order, show the chosen store\'s list and pass its offers to add_basket_to_cart in one call instead of adding items one by one.',
     'For questions about which version or commit is running, use server_info.',
     'Logins: when a result carries accountWarnings, tell the user in one short sentence and offer account_status for details and how to renew.',
     'Household preferences: list_preferences shows saved products (for example "milk" pinned to an exact barcode). Use them for "the usual milk" or "our usual basket" (compare_basket with usual: true). When the user picks a product they want again, offer to save it with save_preference, using its barcode.',
@@ -96,12 +96,12 @@ async function topIds(stores, query) {
 }
 
 /** The server's own tools with their handlers; write tools are left out in read-only mode. */
-function ownTools(stores, preferences, monitor, { readOnly, history }) {
+function ownTools(stores, preferences, monitor, { readOnly, history, delivery = null }) {
   const tools = [
     [SERVER_INFO_TOOL, () => serverInfo(stores, { readOnly })],
     [ACCOUNT_TOOL, () => monitor.status(stores)],
     [SEARCH_TOOL, (args) => searchAllStores(stores, args)],
-    [BASKET_TOOL, (args) => compareBasket(stores, args, { preferences })],
+    [BASKET_TOOL, (args) => compareBasket(stores, args, { preferences, delivery })],
     [ADD_BASKET_TOOL, (args) => addBasketToCart(stores, args, { history })],
     ...PREFERENCE_TOOLS.map((tool) => [tool, (args) => runPreferenceTool(preferences, tool.name, args)]),
     ...(history ? [[PRICE_HISTORY_TOOL, (args) => priceHistory(history, args, { preferences, findIds: (q) => topIds(stores, q) })]] : []),
@@ -121,7 +121,7 @@ function withAccountWarnings(name, result, monitor) {
   return warnings.length ? { ...result, accountWarnings: warnings } : result;
 }
 
-export function createGroceryServer(stores, { readOnly = false, log = () => {}, preferences = null, monitor = new AccountMonitor(), history = null, audit = () => {} } = {}) {
+export function createGroceryServer(stores, { readOnly = false, log = () => {}, preferences = null, monitor = new AccountMonitor(), history = null, audit = () => {}, delivery = null } = {}) {
   const record = (entry) => {
     try {
       audit(entry);
@@ -142,12 +142,12 @@ export function createGroceryServer(stores, { readOnly = false, log = () => {}, 
   }
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: [...[...ownTools(stores, preferences, monitor, { readOnly, history }).values()].map((t) => t.tool), ...[...forwardedTools(stores, { readOnly }).values()].map((r) => r.listed)],
+    tools: [...[...ownTools(stores, preferences, monitor, { readOnly, history, delivery }).values()].map((t) => t.tool), ...[...forwardedTools(stores, { readOnly }).values()].map((r) => r.listed)],
   }));
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args = {} } = request.params;
-    const own = ownTools(stores, preferences, monitor, { readOnly, history }).get(name);
+    const own = ownTools(stores, preferences, monitor, { readOnly, history, delivery }).get(name);
     if (own) {
       const started = Date.now();
       try {
@@ -167,7 +167,7 @@ export function createGroceryServer(stores, { readOnly = false, log = () => {}, 
 
     const route = forwardedTools(stores, { readOnly }).get(name);
     if (!route) {
-      const hidden = readOnly && (forwardedTools(stores, { readOnly: false }).has(name) || ownTools(stores, preferences, monitor, { readOnly: false, history }).has(name));
+      const hidden = readOnly && (forwardedTools(stores, { readOnly: false }).has(name) || ownTools(stores, preferences, monitor, { readOnly: false, history, delivery }).has(name));
       const text = hidden ? `${name} changes data and this server is read-only.` : `Unknown tool: ${name}`;
       return { isError: true, content: [{ type: 'text', text }] };
     }

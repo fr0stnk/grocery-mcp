@@ -18,9 +18,11 @@ export const BASKET_TOOL = {
     'are avoided; when a store has only such a product it is marked unrequested, so ask the user before treating it as the item. Rami Levy multi-buy promotions are applied when the quantity qualifies; ' +
     'club-only offers are listed but not applied. Returns per-store totals with missing items, a fair comparison over items both stores have like for like, ' +
     'and the total if each item is bought where it is cheaper. To answer "which store is cheaper", use overall: comparable (the strict like-for-like part) plus items ' +
-    'that differ only in pack size, compared by unit price at an equal amount (items[].unitPriceComparison, estimated: true); say how many items it covers ' +
+    'that differ only in pack size, compared by unit price at an equal amount (items[].unitPriceComparison, estimated: true); say how many items it covers; when overall.decidedByEstimates is set, the unit-price lines overturn comparable, so say so and name them ' +
     '(itemsCompared of itemsInBasket) and that unit-price lines are estimates. Items marked notEquivalent (different amounts, price bases or an unrequested variant) have no cheapestStore ' +
-    'and are left out of both, so never claim savings on them. Delivery fees and minimum orders are not included. ' +
+    'and are left out of both, so never claim savings on them. ' +
+    'Each store total carries delivery (fee, minimumOrder, belowMinimum, source: live, configured, site or unknown) and totalWithDelivery; overall.withDelivery and ' +
+    'split.withDelivery add one fee per store ordered from, so a split order pays two. A store with belowMinimum: true cannot take the basket as it is; say so. ' +
     'For weighed items (soldByWeight) the quantity is in kilograms; Shufersal packaged produce is priced per kg but sold in whole packs: such offers carry packs ' +
     '(quantity ÷ packWeightKg, rounded, half up, at least 1), packWeightKg and packPrice, and add_basket_to_cart takes packs as their quantity. ' +
     'A multipack of the requested size (6×1.5 L for 1.5 ליטר) is offered only when nothing single is, marked unrequested on the offer and the item. Items may name a saved household preference instead of a query, ' +
@@ -357,6 +359,60 @@ function cheapest(offers) {
   return priced[0][1].lineTotal === priced[1][1].lineTotal ? null : priced[0][0];
 }
 
+/** Each selected store's delivery terms by id; a store whose terms cannot be read has none. */
+async function deliveryLookup(selected, delivery) {
+  const found = await Promise.all(selected.map(async (s) => [s.id, await Promise.resolve().then(() => delivery(s.id)).catch(() => null)]));
+  return Object.fromEntries(found);
+}
+
+const charge = (t) => (t?.fee == null ? null : round(t.fee + (t.serviceFee ?? 0)));
+
+function ranking(selected, amounts) {
+  const ranked = selected.map((s) => [s.id, amounts[s.id]]).sort((a, b) => a[1] - b[1]);
+  return { cheaperStore: ranked[0][1] === ranked[1][1] ? null : ranked[0][0], difference: round(ranked.at(-1)[1] - ranked[0][1]) };
+}
+
+/**
+ * Adds one delivery charge per order: to each store's total, to overall, and
+ * to the split, which orders from every store it buys in. Returns the split's
+ * figures with delivery, or null when a store it uses has no known fee.
+ */
+function addDelivery(terms, { selected, totals, overall, splitLines, split, allComparable, notes }) {
+  const label = (id) => selected.find((s) => s.id === id)?.label ?? id;
+  for (const s of selected) {
+    const t = terms[s.id];
+    if (!t) continue;
+    const total = totals[s.id];
+    const belowMinimum = t.minimumOrder != null && total.itemsFound > 0 && total.total < t.minimumOrder;
+    total.delivery = { ...t, ...(t.minimumOrder != null && total.itemsFound > 0 ? { belowMinimum } : {}) };
+    if (charge(t) != null && total.itemsFound > 0) total.totalWithDelivery = round(total.total + charge(t));
+    if (belowMinimum) notes.push(`${label(s.id)} has a minimum order of ₪${t.minimumOrder} and this basket comes to ₪${total.total} there, so it cannot be ordered there as it is; add items to reach the minimum.`);
+  }
+  const unknown = selected.filter((s) => charge(terms[s.id]) == null).map((s) => label(s.id));
+  if (unknown.length) notes.push(`The delivery fee of ${unknown.join(' and ')} is unknown, so totals there exclude delivery.`);
+  else notes.push('Delivery is one fee per order (delivery.source says where it comes from); store totals and overall.withDelivery add it once per store, and split.withDelivery once for each store it orders from.');
+
+  if (overall && !unknown.length) {
+    const withDelivery = Object.fromEntries(selected.map((s) => [s.id, round(overall[s.id] + charge(terms[s.id]))]));
+    overall.withDelivery = { ...withDelivery, ...ranking(selected, withDelivery) };
+  }
+
+  const used = new Set();
+  for (const l of splitLines) {
+    const priced = Object.entries(l.offers).filter(([, o]) => isPriced(o)).sort((a, b) => a[1].lineTotal - b[1].lineTotal);
+    if (priced.length) used.add(priced[0][0]);
+  }
+  if (!used.size || [...used].some((id) => charge(terms[id]) == null)) return null;
+  const fees = round([...used].reduce((sum, id) => sum + charge(terms[id]), 0));
+  const result = { total: round(split + fees), deliveryFees: fees, stores: [...used] };
+  // Store totals and the split cover the same items only when every item is like for like everywhere.
+  if (used.size > 1 && allComparable && !unknown.length) {
+    const best = Math.min(...selected.map((s) => totals[s.id].totalWithDelivery));
+    if (best <= result.total) notes.push(`Splitting the order costs a second delivery fee: ₪${result.total} in all against ₪${best} from one store.`);
+  }
+  return result;
+}
+
 /**
  * Turns the request into items with a search query. A saved preference or a
  * pinned barcode is searched by its barcode, which returns exactly that
@@ -463,8 +519,9 @@ async function relevantHit(store, query, opts) {
   return { ...hit, value: items };
 }
 
-export async function compareBasket(stores, args = {}, { timeoutMs = 45_000, cache = searchCache, preferences = null } = {}) {
+export async function compareBasket(stores, args = {}, { timeoutMs = 45_000, cache = searchCache, preferences = null, delivery = null } = {}) {
   const selected = selectStores(stores, args.stores);
+  const terms = delivery ? deliveryLookup(selected, delivery) : null;
   const fromOrder = args.source ? await sourceItems(stores, args.source) : null;
   const items = [...(args.items?.length || args.usual ? resolveItems(args, preferences) : []), ...(fromOrder?.items ?? [])];
   if (!items.length) throw new StoreError('items must be a non-empty list, or set usual: true or a source order', 'INVALID_ARGUMENT');
@@ -633,6 +690,12 @@ export async function compareBasket(stores, args = {}, { timeoutMs = 45_000, cac
     overall.difference = round(ranked.at(-1)[1] - ranked[0][1]);
     const parts = [];
     if (estimated.length) parts.push(`${estimated.length} item${estimated.length === 1 ? '' : 's'} sold in different pack sizes ${estimated.length === 1 ? 'is' : 'are'} compared by unit price at an equal amount, an estimate rather than packs you can buy`);
+    // Estimates that overturn the like-for-like verdict are named, so a wrong-product estimate cannot flip the answer unseen.
+    if (comparable.cheaperStore && overall.cheaperStore !== comparable.cheaperStore) {
+      const decisive = estimated.filter((l) => l.unitPriceComparison.cheaperStore !== comparable.cheaperStore).map((l) => l.query);
+      overall.decidedByEstimates = decisive;
+      parts.push(`${overall.cheaperStore ?? 'neither store'} comes out cheaper only because of unit-price estimates (${decisive.join(', ')}); on like-for-like items ${comparable.cheaperStore} is cheaper by ₪${comparable.difference}, so check those lines before relying on overall`);
+    }
     if (overall.itemsCompared * 2 < lines.length) parts.push(`only ${overall.itemsCompared} of ${lines.length} items could be compared`);
     overall.note = parts.length ? `${parts.join('; ')}.` : 'Every compared item is the same product or like for like.';
   }
@@ -644,7 +707,8 @@ export async function compareBasket(stores, args = {}, { timeoutMs = 45_000, cac
   const commonSplit = round(common.reduce((sum, l) => sum + Math.min(...selected.map((s) => l.offers[s.id].lineTotal)), 0));
   const bestSingle = common.length ? Math.min(...selected.map((s) => comparable[s.id])) : null;
 
-  const notes = ['Delivery fees, minimum order amounts and club prices are not included.'];
+  const notes = [terms ? 'Club prices are not included.' : 'Delivery fees, minimum order amounts and club prices are not included.'];
+  const splitWithDelivery = terms ? addDelivery(await terms, { selected, totals, overall, splitLines, split, allComparable: common.length === lines.length, notes }) : null;
   if (lines.some((l) => Object.values(l.offers).some((o) => o?.soldByWeight))) notes.push('For weighed items the quantity is kilograms and the price is per kilogram where the store says so.');
   if (lines.some((l) => !l.identical && Object.values(l.offers).filter(isPriced).length > 1)) notes.push('Items with identical: false compare different products; check that they are acceptable substitutes.');
   if (lines.some((l) => l.notEquivalent)) notes.push('Items whose products differ in size, count or how they are sold (notEquivalent) are in each store\'s total but have no cheapestStore and are left out of comparable and of the split total (split.leftOut); ask which product the user wants.');
@@ -674,6 +738,7 @@ export async function compareBasket(stores, args = {}, { timeoutMs = 45_000, cac
       total: split,
       ...(splitLeftOut.length ? { leftOut: splitLeftOut } : {}),
       ...(bestSingle != null && selected.length > 1 ? { savingsOnCommonItems: round(bestSingle - commonSplit) } : {}),
+      ...(splitWithDelivery ? { withDelivery: splitWithDelivery } : {}),
     },
     notes,
   };

@@ -235,3 +235,16 @@ test('comparable leaves out different sizes and counts; kg quantities prefer per
   assert.deepEqual([out.totals.shufersal.total, out.totals['rami-levy'].total], [47.01, 35.05], 'store totals still include every item');
 });
 
+
+test('GROC-028: overall names the unit-price estimates that overturn the like-for-like verdict', async () => {
+  const catalog = {
+    shufersal: { חלב: [p('shufersal', 'S1', '111', 6, { name: 'חלב 3%' })], אורז: [p('shufersal', 'S2', null, 10, { name: 'אורז 1 ק"ג', pricePerUnit: 10, perUnit: 'kg' })] },
+    'rami-levy': { חלב: [p('rami-levy', 'R1', '111', 5, { name: 'חלב 3%' })], אורז: [p('rami-levy', 'R2', null, 10, { name: 'אורז 500 גרם', pricePerUnit: 20, perUnit: 'kg' })] },
+  };
+  const store = (id) => ({ id, label: id, search: { maxLimit: 20, run: async ({ query }) => catalog[id][query] ?? [] } });
+  const out = await compareBasket([store('shufersal'), store('rami-levy')], { items: [{ query: 'חלב' }, { query: 'אורז' }] }, { cache: new SearchCache() });
+  assert.equal(out.comparable.cheaperStore, 'rami-levy');
+  assert.equal(out.overall.cheaperStore, 'shufersal');
+  assert.deepEqual(out.overall.decidedByEstimates, ['אורז']);
+  assert.match(out.overall.note, /only because of unit-price estimates \(אורז\); on like-for-like items rami-levy is cheaper by ₪1/);
+});
