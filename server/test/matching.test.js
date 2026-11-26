@@ -210,10 +210,26 @@ test('GROC-018: a construct-state query matches the staple, and derived products
   assert.equal((await one2('מטרנה')).identical, true, 'formula in both stores, not a fruit pouch');
 });
 
-test('GROC-019: offers at prices more than 3× apart are not like for like', async () => {
+test('GROC-019: window cleaner is a liquid, gadgets are variants, and offers more than 3× apart are not like for like', async () => {
   const line = await one2('מנקה חלונות');
-  assert.match(line.notEquivalent, /^price .*× the other store's/);
-  assert.equal(line.cheapestStore, null);
+  assert.match(line.offers.shufersal.name, /לניקוי חלונות/, 'a liquid or spray, not the ₪143 or ₪295 gadgets');
+  assert.equal(line.identical, true, 'the same spray in both stores');
+  const p = (store, name, price, extra = {}) => ({ store, productId: name, name, price, priceBasis: 'unit', ...extra });
+  const st = (id, list) => ({ id, label: id, search: { maxLimit: 20, run: async () => list } });
+  const far = (await compareBasket([st('shufersal', [p('shufersal', 'מנקה חלונות', 40)]), st('rami-levy', [p('rami-levy', 'מנקה חלונות', 10)])], { items: [{ query: 'מנקה חלונות', quantity: 1 }] }, { cache: new SearchCache() })).items[0];
+  assert.match(far.notEquivalent, /^price 4× the other store's/);
+  assert.equal(far.cheapestStore, null);
+});
+
+test('GROC-026: the same price per kg in a bigger pack is a size difference, compared at an equal amount', async () => {
+  const S = normalizeShufersalRaw([shufersalRaw({ code: 'P_7296073753117', sku: '7296073753117', name: 'תפוח אדמה לבן ארוז', sellingMethod: { code: 'BY_PACKAGE' }, price: { value: 5.9 }, minWeight: 3000, maxWeight: 3200, pricePerUnit: { value: 5.9 }, valueForComparison: 1, unitForComparison: 'ק"ג' })]);
+  const R = normalizeRamiCatalog({ data: [{ id: 13, name: 'תפוח אדמה לבן', price: { price: 5.9 }, prop: { by_kilo: 1 } }] });
+  const st = (id, list) => ({ id, label: id, search: { maxLimit: 20, run: async () => list } });
+  const out = await compareBasket([st('shufersal', S), st('rami-levy', R)], { items: [{ query: 'תפוחי אדמה', quantity: 1 }] }, { cache: new SearchCache() });
+  const [line] = out.items;
+  assert.equal(line.notEquivalent, '3.1 kg vs 1 kg', 'not a price outlier');
+  assert.deepEqual([line.unitPriceComparison.amount, line.unitPriceComparison.shufersal, line.unitPriceComparison['rami-levy'], line.unitPriceComparison.cheaperStore], [1, 5.9, 5.9, null]);
+  assert.equal(out.overall.itemsCompared, 1);
 });
 
 test('GROC-020: "מידה 4" is a size that must match, not a count of four', async () => {
@@ -225,4 +241,16 @@ test('GROC-020: "מידה 4" is a size that must match, not a count of four', as
 test('GROC-021: sliced bread and product lines named "בייבי" are not variants', async () => {
   assert.equal((await one2('לחם פרוס')).identical, true);
   assert.equal(bestCandidates([{ name: 'חיתולים בייבי סופרים מידה 4' }], 'חיתולים')[0].unrequested, undefined);
+});
+
+test('GROC-022: items differing only in pack size are compared by unit price in overall', async () => {
+  const s = (id) => ({ id, label: id, search: { maxLimit: 20, run: async ({ query: q }) => catalog2[q]?.[id] ?? [] } });
+  const out = await compareBasket([s('shufersal'), s('rami-levy')], { items: ['חיתולים מידה 4', 'לחם פרוס', 'מנקה חלונות'].map((query) => ({ query, quantity: 1 })) }, { cache: new SearchCache() });
+  const [diapers, bread, cleaner] = out.items;
+  assert.deepEqual([diapers.unitPriceComparison.perUnit, diapers.unitPriceComparison.amount, diapers.unitPriceComparison.estimated], ['pc', 28, true]);
+  assert.equal(bread.unitPriceComparison, undefined, 'like for like already');
+  assert.equal(cleaner.unitPriceComparison, undefined, 'the same spray, like for like');
+  assert.deepEqual([out.comparable.items, out.overall.itemsCompared, out.overall.itemsInBasket], [2, 3, 3]);
+  assert.equal(out.overall.shufersal, Math.round((out.comparable.shufersal + diapers.unitPriceComparison.shufersal) * 100) / 100);
+  assert.match(out.overall.note, /unit price at an equal amount/);
 });

@@ -30,7 +30,9 @@ const VARIANT_WORDS = new Set([
   'מיובש', 'מיובשים', 'קלוי', 'קלויים', 'מרוסקות', 'מרוסק', 'חתוכות', 'רסק', 'שרי', 'מיני', 'מלח',
   'ממרח', 'רוטב', 'קמח', 'מיץ', 'נקטר', 'תרכיז', 'משקה', 'פירורי', 'פרורי', 'מרק', 'מחית', 'פסטלים', 'בורקס', 'מילוי',
   // Other kinds of product named after what they are used with: lighter fluid for "פחמים", a robot for "מנקה חלונות".
-  'מדליק', 'מנגל', 'גריל', 'כיסוי', 'נטען', 'חשמלי', 'מכשיר', 'רובוט', 'תמצית', 'קורנישונים', 'מסבחה', 'יפס', 'עוגיות', 'קרקרים', 'צ\'יפס', 'חטיף',
+  'מדליק', 'מנגל', 'גריל', 'כיסוי', 'נטען', 'חשמלי', 'מכשיר', 'רובוט', 'תמצית', 'קורנישונים', 'מסבחה', 'יפס',
+  // Tools sold under the name of what they clean: a double-sided magnetic gadget for "מנקה חלונות".
+  'מגב', 'מגבון', 'מגבונים', 'כפול', 'צדדי', 'מגנטי', 'ספוג', 'ספוגים', 'מברשת', 'מתקן', 'עוגיות', 'קרקרים', 'צ\'יפס', 'חטיף',
   'חומץ', 'חמוץ', 'חמוצים', 'כבוש', 'כבושים', 'קוביות', 'מיובשות', 'פולפה', 'משומר', 'משומרות', 'שימורים',
   'סושי', 'ריזוטו', 'סטיקי',
   // Added flavours, which turn a plain product into a variant: "לחם מחמצת עגבניות" is tomato bread.
@@ -67,6 +69,8 @@ function constructOf(word) {
 
 // Query words that make a variant word part of the request: plant milks are sold as "משקה" (a drink).
 const IMPLIES = { חלב: ['משקה'] };
+// Query words with another form in product names: "נוזל לניקוי חלונות" is a "מנקה חלונות".
+const SYNONYMS = { מנקה: ['ניקוי'], מנקים: ['ניקוי'] };
 
 /**
  * The words of a query that say what the product is, each with the forms it
@@ -78,7 +82,7 @@ export function queryTerms(query) {
     .map((w) => {
       const bare = bareOf(w);
       // A leading ב/ה/ו may be a prefix ("בחלב") or part of the word ("בננות"), so both readings count.
-      return { word: w, forms: [...new Set([w, bare, stemOf(w), stemOf(bare), constructOf(w), constructOf(bare)].filter(Boolean))] };
+      return { word: w, forms: [...new Set([w, bare, stemOf(w), stemOf(bare), constructOf(w), constructOf(bare), ...(SYNONYMS[w] ?? SYNONYMS[bare] ?? [])].filter(Boolean))] };
     });
 }
 

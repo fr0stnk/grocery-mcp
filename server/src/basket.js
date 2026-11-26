@@ -17,7 +17,9 @@ export const BASKET_TOOL = {
     'closest in-stock match (identical: false, so say the products differ). Variants the query does not mention (Diet, Zero, flavoured, frozen, wholegrain, a six-pack) ' +
     'are avoided; when a store has only such a product it is marked unrequested, so ask the user before treating it as the item. Rami Levy multi-buy promotions are applied when the quantity qualifies; ' +
     'club-only offers are listed but not applied. Returns per-store totals with missing items, a fair comparison over items both stores have like for like, ' +
-    'and the total if each item is bought where it is cheaper. Items marked notEquivalent (different amounts, price bases or an unrequested variant) have no cheapestStore ' +
+    'and the total if each item is bought where it is cheaper. To answer "which store is cheaper", use overall: comparable (the strict like-for-like part) plus items ' +
+    'that differ only in pack size, compared by unit price at an equal amount (items[].unitPriceComparison, estimated: true); say how many items it covers ' +
+    '(itemsCompared of itemsInBasket) and that unit-price lines are estimates. Items marked notEquivalent (different amounts, price bases or an unrequested variant) have no cheapestStore ' +
     'and are left out of both, so never claim savings on them. Delivery fees and minimum orders are not included. ' +
     'For weighed items (soldByWeight) the quantity is in kilograms; Shufersal packaged produce is priced per kg but sold in whole packs: such offers carry packs ' +
     '(quantity ÷ packWeightKg, rounded, half up, at least 1), packWeightKg and packPrice, and add_basket_to_cart takes packs as their quantity. ' +
@@ -235,11 +237,42 @@ const FRACTIONAL = 'INCOMPATIBLE_QUANTITY_BASIS';
  * best candidates: the ₪295 window-cleaning robot among ₪11 sprays.
  */
 function withoutOutliers(list) {
-  const prices = list.map((x) => x.price).filter((p) => p > 0).sort((a, b) => a - b);
+  const unit = list[0]?.perUnit;
+  const byUnit = unit && list.every((x) => x.pricePerUnit > 0 && x.perUnit === unit);
+  const priceOf = (x) => (byUnit ? x.pricePerUnit : x.price);
+  const prices = list.map(priceOf).filter((p) => p > 0).sort((a, b) => a - b);
   if (prices.length < 3) return list;
   const median = prices[Math.floor(prices.length / 2)];
-  const kept = list.filter((x) => !(x.price > median * PRICE_RATIO));
+  const kept = list.filter((x) => !(priceOf(x) > median * PRICE_RATIO));
   return kept.length ? kept : list;
+}
+
+/**
+ * The cost of the same amount in each store, for a line whose products differ
+ * only in pack size or count (0.5 kg vs 1 kg): price per kg, litre or piece ×
+ * the smaller pack × the quantity. Variants, price outliers and different
+ * price bases do not qualify.
+ */
+function unitPriceComparisonOf(selected, offers, quantity, reason) {
+  if (selected.length !== 2) return null;
+  const priced = selected.map((st) => offers[st.id]);
+  if (!priced.every(isPriced) || priced.some((o) => o.unrequested)) return null;
+  const basis = priced[0].priceBasis;
+  if (sizeDifference(priced, quantity) !== reason || basis !== priced[1].priceBasis || !['unit', 'kg'].includes(basis)) return null;
+  const perUnit = priced[0].perUnit;
+  if (!perUnit || priced.some((o) => !(o.pricePerUnit > 0) || o.perUnit !== perUnit)) return null;
+  // Weighed lines compare the kilograms each store sells; pack lines one pack of the smaller size, times the quantity.
+  const amounts = basis === 'kg'
+    ? priced.map((o) => boughtKg(o, quantity))
+    : priced.map((o) => (perUnit === 'pc' ? o.count : sizeOf(o)?.unit === perUnit ? sizeOf(o).amount * quantity : null));
+  if (amounts.some((x) => !(x > 0))) return null;
+  const amount = round(Math.min(...amounts));
+  const out = { perUnit, amount, amountLabel: perUnit === 'pc' ? `${amount} pcs` : `${amount} ${perUnit}`, estimated: true };
+  selected.forEach((st, i) => { out[st.id] = round(priced[i].pricePerUnit * amount); });
+  const [a, b] = selected.map((st) => out[st.id]);
+  out.cheaperStore = a === b ? null : a < b ? selected[0].id : selected[1].id;
+  out.difference = round(Math.abs(a - b));
+  return out;
 }
 
 /** Whole packs for a weight in kg: the nearest number of packs, half rounding up, and at least one. */
@@ -264,6 +297,7 @@ function offer(match, quantity) {
     ...(match.barcodeInferred ? { barcodeInferred: true } : {}),
     ...(match.size ? { size: match.size } : {}),
     ...(match.count ? { count: match.count } : {}),
+    ...(match.pricePerUnit > 0 && match.perUnit ? { pricePerUnit: match.pricePerUnit, perUnit: match.perUnit } : {}),
     ...(match.fit ? { fit: match.fit } : {}),
     ...(match.unrequested ? { unrequested: match.unrequested } : {}),
     ...(packs ? { packs, packWeightKg: match.packWeightKg, packPrice: match.packPrice, lineTotal: round(packs * match.packPrice) } : lineCost(match, quantity)),
@@ -282,22 +316,32 @@ const PRICE_RATIO = 3;
  * be the same. Only sizes that are known on both sides can differ; unknown
  * sizes count as a match.
  */
-function equivalenceOf(offers) {
+function equivalenceOf(offers, quantity = 1) {
   const variant = offers.find((o) => o.unrequested);
   if (variant) return `${variant.name} is a variant that was not asked for (${variant.unrequested.join(', ')})`;
   if (offers.length < 2) return 'match';
-  const reason = sizeDifference(offers);
-  if (reason !== 'match') return reason;
   // Matching names at prices this far apart are different kinds of product (a ₪295 window-cleaning robot vs a ₪25 spray).
-  const [low, high] = offers.map((o) => o.lineTotal).sort((x, y) => x - y);
-  if (low > 0 && high / low > PRICE_RATIO) return `price ${Math.round((high / low) * 10) / 10}× the other store's, likely a different product`;
-  return 'match';
-}
-
-function sizeDifference(offers) {
+  // Where both have a price per kg, litre or piece, that is what is compared: a 3.1 kg potato pack at 5.9/kg is not an outlier.
   const [a, b] = offers;
   const basis = (o) => o.priceBasis ?? 'unit';
   if (basis(a) !== basis(b)) return `${basis(a)} vs ${basis(b)}`;
+  const perUnit = offers.every((o) => o.pricePerUnit > 0 && o.perUnit === a.perUnit);
+  const [low, high] = offers.map((o) => (perUnit ? o.pricePerUnit : o.lineTotal)).sort((x, y) => x - y);
+  if (low > 0 && high / low > PRICE_RATIO) return `price ${Math.round((high / low) * 10) / 10}× the other store's${perUnit ? ` per ${a.perUnit}` : ''}, likely a different product`;
+  return sizeDifference(offers, quantity);
+}
+
+/** Kilograms an offer buys: whole packs of packWeightKg, or the requested weight. */
+const boughtKg = (o, quantity) => (o.packs ? round(o.packs * o.packWeightKg) : quantity);
+
+function sizeDifference(offers, quantity = 1) {
+  const [a, b] = offers;
+  const basis = (o) => o.priceBasis ?? 'unit';
+  if (basis(a) !== basis(b)) return `${basis(a)} vs ${basis(b)}`;
+  if (basis(a) === 'kg') {
+    const [ka, kb] = [boughtKg(a, quantity), boughtKg(b, quantity)];
+    return Math.abs(ka - kb) <= Math.max(ka, kb) * 0.2 ? 'match' : `${ka} kg vs ${kb} kg`;
+  }
   if (basis(a) !== 'unit') return 'match';
   if (a.count && b.count && a.count !== b.count) return `${a.count} vs ${b.count} units`;
   const sa = sizeOf(a);
@@ -530,7 +574,8 @@ export async function compareBasket(stores, args = {}, { timeoutMs = 45_000, cac
     // Identity is claimed only for offers that can actually be priced.
     if (identical && !Object.values(offers).every(isPriced)) identical = false;
     const unrequested = [...new Set(Object.values(offers).flatMap((o) => o?.unrequested ?? []))];
-    const equivalence = identical ? null : equivalenceOf(Object.values(offers).filter(isPriced));
+    const equivalence = identical ? null : equivalenceOf(Object.values(offers).filter(isPriced), it.quantity);
+    const unitPriceComparison = equivalence && equivalence !== 'match' ? unitPriceComparisonOf(selected, offers, it.quantity, equivalence) : null;
     return {
       query: it.label ?? it.query,
       ...(it.barcode ? { searchedBy: 'barcode' } : {}),
@@ -546,6 +591,7 @@ export async function compareBasket(stores, args = {}, { timeoutMs = 45_000, cac
       ...(identical ? { confidence: Object.values(offers).some((o) => o?.barcodeInferred) ? 'inferred' : 'exact' } : {}),
       // Different amounts of different products have no cheaper store.
       cheapestStore: equivalence && equivalence !== 'match' ? null : cheapest(offers),
+      ...(unitPriceComparison ? { unitPriceComparison } : {}),
       offers,
     };
   });
@@ -574,6 +620,21 @@ export async function compareBasket(stores, args = {}, { timeoutMs = 45_000, cac
     const ranked = selected.map((s) => [s.id, comparable[s.id]]).sort((a, b) => a[1] - b[1]);
     comparable.cheaperStore = ranked[0][1] === ranked[1][1] ? null : ranked[0][0];
     comparable.difference = round(ranked.at(-1)[1] - ranked[0][1]);
+  }
+
+  // overall answers "which store is cheaper" over every item that can be compared: like for like, or at an equal amount.
+  const estimated = lines.filter((l) => l.unitPriceComparison);
+  let overall = null;
+  if (selected.length > 1 && (common.length || estimated.length)) {
+    overall = { itemsCompared: common.length + estimated.length, itemsInBasket: lines.length };
+    for (const st of selected) overall[st.id] = round((common.length ? comparable[st.id] : 0) + estimated.reduce((sum, l) => sum + l.unitPriceComparison[st.id], 0));
+    const ranked = selected.map((st) => [st.id, overall[st.id]]).sort((a, b) => a[1] - b[1]);
+    overall.cheaperStore = ranked[0][1] === ranked[1][1] ? null : ranked[0][0];
+    overall.difference = round(ranked.at(-1)[1] - ranked[0][1]);
+    const parts = [];
+    if (estimated.length) parts.push(`${estimated.length} item${estimated.length === 1 ? '' : 's'} sold in different pack sizes ${estimated.length === 1 ? 'is' : 'are'} compared by unit price at an equal amount, an estimate rather than packs you can buy`);
+    if (overall.itemsCompared * 2 < lines.length) parts.push(`only ${overall.itemsCompared} of ${lines.length} items could be compared`);
+    overall.note = parts.length ? `${parts.join('; ')}.` : 'Every compared item is the same product or like for like.';
   }
 
   // The split buys each item where it is cheaper, which means nothing for items that are not like for like.
@@ -608,6 +669,7 @@ export async function compareBasket(stores, args = {}, { timeoutMs = 45_000, cac
     items: lines,
     totals,
     comparable,
+    ...(overall ? { overall } : {}),
     split: {
       total: split,
       ...(splitLeftOut.length ? { leftOut: splitLeftOut } : {}),
