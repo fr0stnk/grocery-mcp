@@ -264,3 +264,10 @@ test('GROC-024: a pack of tea bags is read as bags × weight, and bag counts are
   assert.deepEqual(parseSize('25 שקיקים*2 גרם'), { amount: 0.05, unit: 'kg', label: '0.05 kg', pack: 25, each: '0.002 kg' });
   assert.equal(parseCount('20 שקיקים'), 20);
 });
+
+test('GROC-028/029: moist wipes, concentrates and flavoured tea are variants', () => {
+  assert.deepEqual(bestCandidates([{ name: 'נייר טואלט לח' }, { name: 'נייר טואלט רמי לוי 30 יח' }], 'נייר טואלט').map((x) => x.name), ['נייר טואלט רמי לוי 30 יח']);
+  assert.deepEqual(bestCandidates([{ name: 'מרכך כביסה מרוכז' }, { name: 'מרכך כביסה 4 ליטר' }], 'מרכך כביסה').map((x) => x.name), ['מרכך כביסה 4 ליטר']);
+  assert.deepEqual(bestCandidates([{ name: 'תה שחור אוכמניות' }, { name: 'תה ירוק נענע' }, { name: 'תה ויסוצקי קלאסיק' }], 'תה').map((x) => x.name), ['תה ויסוצקי קלאסיק']);
+  assert.equal(bestCandidates([{ name: 'מגבונים לחים' }], 'מגבונים לחים')[0].unrequested, undefined);
+});

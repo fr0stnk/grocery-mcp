@@ -34,6 +34,9 @@ const VARIANT_WORDS = new Set([
   // Tools sold under the name of what they clean: a double-sided magnetic gadget for "מנקה חלונות".
   // Snack and treat editions: birthday, sweet and mixed Bamba are not plain Bamba.
   'הולדת', 'מתוקה', 'מתוק', 'מיקס', 'ביסלי', 'בסלי', 'מאנצ',
+  // Moist wipes are not toilet paper, a concentrate is not the regular liquid, and flavoured tea is not plain tea.
+  'לח', 'לחה', 'לחים', 'לחות', 'מרוכז', 'מרוכזת', 'מרוכזים',
+  'אוכמניות', 'נענע', 'יסמין', 'לימונית', 'לואיזה', 'קמומיל', 'מליסה',
   'מגב', 'מגבון', 'מגבונים', 'כפול', 'צדדי', 'מגנטי', 'ספוג', 'ספוגים', 'מברשת', 'מתקן', 'עוגיות', 'קרקרים', 'צ\'יפס',
   'חומץ', 'חמוץ', 'חמוצים', 'כבוש', 'כבושים', 'קוביות', 'מיובשות', 'פולפה', 'משומר', 'משומרות', 'שימורים',
   'סושי', 'ריזוטו', 'סטיקי',
