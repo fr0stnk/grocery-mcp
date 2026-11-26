@@ -32,7 +32,9 @@ const VARIANT_WORDS = new Set([
   // Other kinds of product named after what they are used with: lighter fluid for "פחמים", a robot for "מנקה חלונות".
   'מדליק', 'מנגל', 'גריל', 'כיסוי', 'נטען', 'חשמלי', 'מכשיר', 'רובוט', 'תמצית', 'קורנישונים', 'מסבחה', 'יפס',
   // Tools sold under the name of what they clean: a double-sided magnetic gadget for "מנקה חלונות".
-  'מגב', 'מגבון', 'מגבונים', 'כפול', 'צדדי', 'מגנטי', 'ספוג', 'ספוגים', 'מברשת', 'מתקן', 'עוגיות', 'קרקרים', 'צ\'יפס', 'חטיף',
+  // Snack and treat editions: birthday, sweet and mixed Bamba are not plain Bamba.
+  'הולדת', 'מתוקה', 'מתוק', 'מיקס', 'ביסלי', 'בסלי', 'מאנצ',
+  'מגב', 'מגבון', 'מגבונים', 'כפול', 'צדדי', 'מגנטי', 'ספוג', 'ספוגים', 'מברשת', 'מתקן', 'עוגיות', 'קרקרים', 'צ\'יפס',
   'חומץ', 'חמוץ', 'חמוצים', 'כבוש', 'כבושים', 'קוביות', 'מיובשות', 'פולפה', 'משומר', 'משומרות', 'שימורים',
   'סושי', 'ריזוטו', 'סטיקי',
   // Added flavours, which turn a plain product into a variant: "לחם מחמצת עגבניות" is tomato bread.

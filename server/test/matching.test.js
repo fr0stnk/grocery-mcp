@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { compareBasket, constraintsOf, fitOf, packsFor, pickMatches, statedIn } from '../src/basket.js';
-import { normalizeRamiCatalog, normalizeShufersalRaw } from '../src/normalize.js';
+import { normalizeRamiCatalog, normalizeShufersalRaw, parseCount, parseSize } from '../src/normalize.js';
 import { SearchCache } from '../src/cache.js';
 import { bestCandidates, queryTerms, withoutPackaging } from '../src/match.js';
 import { relevantOnly, searchAllStores } from '../src/search.js';
@@ -253,4 +253,14 @@ test('GROC-022: items differing only in pack size are compared by unit price in 
   assert.deepEqual([out.comparable.items, out.overall.itemsCompared, out.overall.itemsInBasket], [2, 3, 3]);
   assert.equal(out.overall.shufersal, Math.round((out.comparable.shufersal + diapers.unitPriceComparison.shufersal) * 100) / 100);
   assert.match(out.overall.note, /unit price at an equal amount/);
+});
+
+test('GROC-027: plain Bamba beats birthday, sweet, mixed and Munch editions', () => {
+  const rami = ['במבה ביסלי גריל מיקס 70 גרם', 'במבה מאנצ\' צ\'דר 60 גר', 'במבה מתוקה בטעם תות אסם 30 גרם', 'במבה יום הולדת חטיף בוטנים אסם 80 גרם', 'במבה חטיף בוטנים אסם 80 גרם'].map((name) => ({ name, price: 2.8 }));
+  assert.deepEqual(bestCandidates(rami, 'במבה').map((x) => x.name), ['במבה חטיף בוטנים אסם 80 גרם']);
+});
+
+test('GROC-024: a pack of tea bags is read as bags × weight, and bag counts are counts', () => {
+  assert.deepEqual(parseSize('25 שקיקים*2 גרם'), { amount: 0.05, unit: 'kg', label: '0.05 kg', pack: 25, each: '0.002 kg' });
+  assert.equal(parseCount('20 שקיקים'), 20);
 });

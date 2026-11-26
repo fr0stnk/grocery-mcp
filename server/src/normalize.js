@@ -30,6 +30,7 @@ const SIZE_RE = new RegExp(
   'u',
 );
 
+const PACK_OF_RE = /(\d+)\s*(?:שקיקים|שקיות|יחידות|יח'?)\s*[*xX×]\s*/u;
 // Words that make a size the size of each item in a pack: "שישייה 1.5 ליטר" is six 1.5 L bottles.
 const PACK_WORDS = [[/שישי(?:י)?(?:ה|ת)/u, 6], [/רביעי(?:י)?(?:ה|ת)/u, 4], [/(?:^|\s)(?:זוג|צמד)(?=\s|$)/u, 2]];
 
@@ -41,7 +42,8 @@ const PACK_WORDS = [[/שישי(?:י)?(?:ה|ת)/u, 6], [/רביעי(?:י)?(?:ה|�
  */
 export function parseSize(text) {
   if (typeof text !== 'string') return null;
-  const normalized = text.replace(/[״]/g, '"').replace(/[׳]/g, "'");
+  // "25 שקיקים*2 גרם" is 25 bags of 2 g each, written like "25*2 גרם".
+  const normalized = text.replace(/[״]/g, '"').replace(/[׳]/g, "'").replace(PACK_OF_RE, '$1*');
   const m = SIZE_RE.exec(normalized);
   if (!m) return null;
   const value = Number(m[2].replace(',', '.'));
@@ -53,7 +55,7 @@ export function parseSize(text) {
   return { amount, unit, label: `${amount} ${unit}`, ...(count > 1 ? { pack: count, each: `${each} ${unit}` } : {}) };
 }
 
-const COUNT_RE = /(\d+)\s*(?:יחידות|יחי'|יח'|יח)(?=$|[\s,.;:)\-/])/u;
+const COUNT_RE = /(\d+)\s*(?:יחידות|יחי'|יח'|יח|שקיקים|שקיות)(?=$|[\s,.;:)\-/*])/u;
 
 /** Reads a pack count such as "12 יחידות" or "ביצים 12 יח גדול L"; a single unit returns null. */
 export function parseCount(text) {
