@@ -248,3 +248,18 @@ test('GROC-028: overall names the unit-price estimates that overturn the like-fo
   assert.deepEqual(out.overall.decidedByEstimates, ['אורז']);
   assert.match(out.overall.note, /only because of unit-price estimates \(אורז\); on like-for-like items rami-levy is cheaper by ₪1/);
 });
+
+test('GROC-034: a premium brand at under 5× the house brand per litre is a size difference, not an outlier', async () => {
+  const run = async (dearPerL) => {
+    const catalog = {
+      shufersal: { 'מרכך כביסה': [p('shufersal', 'S1', null, dearPerL, { name: 'מרכך כביסה 1 ליטר', pricePerUnit: dearPerL, perUnit: 'L' })] },
+      'rami-levy': { 'מרכך כביסה': [p('rami-levy', 'R1', null, 15.9, { name: 'מרכך כביסה 4 ליטר', pricePerUnit: 3.98, perUnit: 'L' })] },
+    };
+    const store = (id) => ({ id, label: id, search: { maxLimit: 20, run: async ({ query }) => catalog[id][query] ?? [] } });
+    return (await compareBasket([store('shufersal'), store('rami-levy')], { items: [{ query: 'מרכך כביסה' }] }, { cache: new SearchCache() })).items[0];
+  };
+  const dubi = await run(16.9);
+  assert.equal(dubi.notEquivalent, '1 L vs 4 L');
+  assert.equal(dubi.unitPriceComparison.cheaperStore, 'rami-levy');
+  assert.match((await run(24.9)).notEquivalent, /6\.3× the other store's per L, likely a different product/);
+});

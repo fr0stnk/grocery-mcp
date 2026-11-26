@@ -67,9 +67,10 @@ test('compare_basket adds one delivery fee per order and flags a basket below th
   assert.equal(out.totals['rami-levy'].delivery.belowMinimum, true);
   assert.ok(out.notes.some((n) => n.includes('Rami Levy has a minimum order of ₪50')));
 
-  assert.deepEqual(out.overall.withDelivery, { shufersal: 57.9, 'rami-levy': 51.9, cheaperStore: 'rami-levy', difference: 6 });
+  // Rami Levy is cheaper with delivery, but its ₪22 basket is below the minimum, so Shufersal is the store that can take the order.
+  assert.deepEqual(out.overall.withDelivery, { shufersal: 57.9, 'rami-levy': 51.9, cheaperStore: 'shufersal', belowMinimum: ['rami-levy'] });
   // The split buys milk at Rami Levy and bread at Shufersal, so it pays both fees.
-  assert.deepEqual(out.split.withDelivery, { total: 85.8, deliveryFees: 65.8, stores: ['rami-levy', 'shufersal'] });
+  assert.deepEqual(out.split.withDelivery, { total: 85.8, deliveryFees: 65.8, stores: ['rami-levy', 'shufersal'], belowMinimum: ['rami-levy'] });
   assert.ok(out.notes.some((n) => n.startsWith('Splitting the order costs a second delivery fee')));
   assert.ok(!out.notes.some((n) => n.startsWith('Delivery fees, minimum order')));
 });
@@ -114,4 +115,17 @@ test('fetchShufersalDeliveryFee reads the slot list with the saved session', asy
     server.closeAllConnections?.();
     await new Promise((r) => server.close(r));
   }
+});
+
+test('GROC-031: a store below its minimum is never the recommended store, and a split part below it is flagged', async () => {
+  const delivery = async (id) => (id === 'shufersal' ? { fee: 35.9, minimumOrder: null, source: 'live' } : { fee: 29.9, minimumOrder: 50, source: 'site' });
+  const out = await compareBasket([store('shufersal'), store('rami-levy')], { items: [{ query: 'חלב' }] }, { cache: new SearchCache(), delivery });
+  assert.equal(out.totals['rami-levy'].delivery.belowMinimum, true);
+  assert.deepEqual(out.overall.withDelivery, { shufersal: 41.9, 'rami-levy': 34.9, cheaperStore: 'shufersal', belowMinimum: ['rami-levy'] });
+
+  // Milk is cheaper at Rami Levy and bread at Shufersal, but the Rami Levy part (₪10) is below its minimum.
+  const split = await compareBasket([store('shufersal'), store('rami-levy')], { items }, { cache: new SearchCache(), delivery });
+  assert.deepEqual(split.split.withDelivery.belowMinimum, ['rami-levy']);
+  assert.ok(split.notes.some((n) => n.includes('The split cannot be ordered as it is: its Rami Levy part (₪10) is below the ₪50 minimum')));
+  assert.ok(split.notes.some((n) => n.includes('against ₪57.9 from one store')), 'only an orderable store is the alternative');
 });

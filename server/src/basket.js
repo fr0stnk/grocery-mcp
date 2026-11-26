@@ -310,6 +310,8 @@ function offer(match, quantity) {
 
 const isPriced = (o) => Boolean(o && !o.excluded);
 const PRICE_RATIO = 3;
+// A price per unit may differ more between a premium brand and a house brand (Dubi softener at 16.9/L against 3.98/L) than a line total between two of a kind.
+const UNIT_PRICE_RATIO = 5;
 
 /**
  * Whether different products are still like for like: 'match', or why not
@@ -329,7 +331,7 @@ function equivalenceOf(offers, quantity = 1) {
   if (basis(a) !== basis(b)) return `${basis(a)} vs ${basis(b)}`;
   const perUnit = offers.every((o) => o.pricePerUnit > 0 && o.perUnit === a.perUnit);
   const [low, high] = offers.map((o) => (perUnit ? o.pricePerUnit : o.lineTotal)).sort((x, y) => x - y);
-  if (low > 0 && high / low > PRICE_RATIO) return `price ${Math.round((high / low) * 10) / 10}× the other store's${perUnit ? ` per ${a.perUnit}` : ''}, likely a different product`;
+  if (low > 0 && high / low > (perUnit ? UNIT_PRICE_RATIO : PRICE_RATIO)) return `price ${Math.round((high / low) * 10) / 10}× the other store's${perUnit ? ` per ${a.perUnit}` : ''}, likely a different product`;
   return sizeDifference(offers, quantity);
 }
 
@@ -392,22 +394,33 @@ function addDelivery(terms, { selected, totals, overall, splitLines, split, allC
   if (unknown.length) notes.push(`The delivery fee of ${unknown.join(' and ')} is unknown, so totals there exclude delivery.`);
   else notes.push('Delivery is one fee per order (delivery.source says where it comes from); store totals and overall.withDelivery add it once per store, and split.withDelivery once for each store it orders from.');
 
+  // A store whose basket is below its minimum cannot take the order, so it is never the recommended store.
+  const below = selected.filter((s) => totals[s.id].delivery?.belowMinimum).map((s) => s.id);
+  const orderable = selected.filter((s) => !below.includes(s.id));
   if (overall && !unknown.length) {
     const withDelivery = Object.fromEntries(selected.map((s) => [s.id, round(overall[s.id] + charge(terms[s.id]))]));
-    overall.withDelivery = { ...withDelivery, ...ranking(selected, withDelivery) };
+    const verdict = orderable.length > 1 ? ranking(orderable, withDelivery) : { cheaperStore: orderable[0]?.id ?? null };
+    overall.withDelivery = { ...withDelivery, ...verdict, ...(below.length ? { belowMinimum: below } : {}) };
   }
 
-  const used = new Set();
+  // What the split buys at each store; each part is its own order.
+  const part = {};
   for (const l of splitLines) {
-    const priced = Object.entries(l.offers).filter(([, o]) => isPriced(o)).sort((a, b) => a[1].lineTotal - b[1].lineTotal);
-    if (priced.length) used.add(priced[0][0]);
+    const [id, o] = Object.entries(l.offers).filter(([, x]) => isPriced(x)).sort((a, b) => a[1].lineTotal - b[1].lineTotal)[0] ?? [];
+    if (id) part[id] = (part[id] ?? 0) + o.lineTotal;
   }
+  const used = new Set(Object.keys(part));
   if (!used.size || [...used].some((id) => charge(terms[id]) == null)) return null;
   const fees = round([...used].reduce((sum, id) => sum + charge(terms[id]), 0));
   const result = { total: round(split + fees), deliveryFees: fees, stores: [...used] };
+  const short = [...used].filter((id) => terms[id].minimumOrder != null && part[id] < terms[id].minimumOrder);
+  if (short.length) {
+    result.belowMinimum = short;
+    notes.push(`The split cannot be ordered as it is: its ${short.map((id) => `${label(id)} part (₪${round(part[id])}) is below the ₪${terms[id].minimumOrder} minimum`).join(' and ')}.`);
+  }
   // Store totals and the split cover the same items only when every item is like for like everywhere.
-  if (used.size > 1 && allComparable && !unknown.length) {
-    const best = Math.min(...selected.map((s) => totals[s.id].totalWithDelivery));
+  if (used.size > 1 && allComparable && !unknown.length && orderable.length) {
+    const best = Math.min(...orderable.map((s) => totals[s.id].totalWithDelivery));
     if (best <= result.total) notes.push(`Splitting the order costs a second delivery fee: ₪${result.total} in all against ₪${best} from one store.`);
   }
   return result;
