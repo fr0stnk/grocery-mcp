@@ -18,7 +18,7 @@ export const BASKET_TOOL = {
     'are avoided; when a store has only such a product it is marked unrequested, so ask the user before treating it as the item. Rami Levy multi-buy promotions are applied when the quantity qualifies; ' +
     'club-only offers are listed but not applied. Returns per-store totals with missing items, a fair comparison over items both stores have like for like, ' +
     'and the total if each item is bought where it is cheaper. To answer "which store is cheaper", use overall: comparable (the strict like-for-like part) plus items ' +
-    'that differ only in pack size, compared by unit price at an equal amount (items[].unitPriceComparison, estimated: true); say how many items it covers; when overall.decidedByEstimates is set, the unit-price lines overturn comparable, so say so and name them ' +
+    'that differ only in pack size, compared by unit price at an equal amount (items[].unitPriceComparison, estimated: true); say how many items it covers, and keep overall.likeForLike (certain) apart from overall.estimated (approximate); when overall.decidedByEstimates is set, the unit-price lines overturn comparable, so say so and name them ' +
     '(itemsCompared of itemsInBasket) and that unit-price lines are estimates. Items marked notEquivalent (different amounts, price bases or an unrequested variant) have no cheapestStore ' +
     'and are left out of both, so never claim savings on them. ' +
     'Each store total carries delivery (fee, minimumOrder, belowMinimum, source: live, configured, site or unknown) and totalWithDelivery; overall.withDelivery and ' +
@@ -708,6 +708,16 @@ export async function compareBasket(stores, args = {}, { timeoutMs = 45_000, cac
       const decisive = estimated.filter((l) => l.unitPriceComparison.cheaperStore !== comparable.cheaperStore).map((l) => l.query);
       overall.decidedByEstimates = decisive;
       parts.push(`${overall.cheaperStore ?? 'neither store'} comes out cheaper only because of unit-price estimates (${decisive.join(', ')}); on like-for-like items ${comparable.cheaperStore} is cheaper by ₪${comparable.difference}, so check those lines before relying on overall`);
+    }
+    // The certain and the estimated parts are reported apart, so ₪0.10 like for like plus ₪77 of estimates is not read as a ₪77 saving.
+    if (estimated.length) {
+      const est = Object.fromEntries(selected.map((st) => [st.id, round(estimated.reduce((sum, l) => sum + l.unitPriceComparison[st.id], 0))]));
+      overall.likeForLike = common.length ? { items: common.length, cheaperStore: comparable.cheaperStore, difference: comparable.difference } : { items: 0 };
+      overall.estimated = { items: estimated.length, ...ranking(selected, est) };
+      if (overall.estimated.difference > (comparable.difference ?? 0)) {
+        const certain = common.length ? `₪${comparable.difference} is like for like${comparable.cheaperStore ? ` (${comparable.cheaperStore} cheaper)` : ''}` : 'none of it is like for like';
+        parts.push(`most of the difference is estimated: ${certain}, and ₪${overall.estimated.difference}${overall.estimated.cheaperStore ? ` (${overall.estimated.cheaperStore} cheaper)` : ''} comes from ${estimated.length} unit-price estimate${estimated.length === 1 ? '' : 's'}; present the estimated part as approximate`);
+      }
     }
     if (overall.itemsCompared * 2 < lines.length) parts.push(`only ${overall.itemsCompared} of ${lines.length} items could be compared`);
     overall.note = parts.length ? `${parts.join('; ')}.` : 'Every compared item is the same product or like for like.';

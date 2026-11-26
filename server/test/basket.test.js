@@ -247,6 +247,9 @@ test('GROC-028: overall names the unit-price estimates that overturn the like-fo
   assert.equal(out.overall.cheaperStore, 'shufersal');
   assert.deepEqual(out.overall.decidedByEstimates, ['אורז']);
   assert.match(out.overall.note, /only because of unit-price estimates \(אורז\); on like-for-like items rami-levy is cheaper by ₪1/);
+  assert.deepEqual(out.overall.likeForLike, { items: 1, cheaperStore: 'rami-levy', difference: 1 });
+  assert.deepEqual(out.overall.estimated, { items: 1, cheaperStore: 'shufersal', difference: 5 });
+  assert.match(out.overall.note, /most of the difference is estimated: ₪1 is like for like \(rami-levy cheaper\), and ₪5 \(shufersal cheaper\) comes from 1 unit-price estimate/);
 });
 
 test('GROC-034: a premium brand at under 5× the house brand per litre is a size difference, not an outlier', async () => {
