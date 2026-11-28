@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { normalizeRamiCatalog, normalizeRamiLevy, normalizeShufersal, normalizeShufersalRaw, gs1Valid } from './normalize.js';
+import { normalizeRamiCatalog, normalizeRamiLevy, normalizeShufersal, normalizeShufersalRaw, gs1Valid, StoreError } from './normalize.js';
 import { fetchRamiCatalog } from './rami-catalog.js';
 import { fetchShufersalSearch } from './shufersal-search.js';
 import { StoreClient } from './stores.js';
@@ -58,7 +58,10 @@ function searchFor(def, env) {
           return normalizeShufersalRaw(results).slice(0, limit);
         } catch (error) {
           process.stderr.write(`[grocery] shufersal direct search failed (${error.message}); using the adapter's search\n`);
-          return fallback();
+          const items = await fallback();
+          // After a timeout an empty answer is more likely the store struggling than a product it lacks.
+          if (!items.length) throw new StoreError(`shufersal: no results from the adapter after the direct search failed (${error.message})`);
+          return items;
         }
       },
     };

@@ -8,6 +8,20 @@ const p = (store, productId, barcode, price, extra = {}) => ({ store, productId,
 // Fixtures named only by id get the query in their name, as real search results would carry it.
 const named = (list, query) => (list ?? []).map((x) => (x.name === x.productId ? { ...x, name: `${query} ${x.productId}` } : x));
 
+test('SearchCache keeps empty results only briefly, and never over earlier results (GROC-045)', async () => {
+  let now = 0;
+  const cache = new SearchCache({ ttlMs: 1000, emptyTtlMs: 10, staleMs: 5000, now: () => now });
+  assert.deepEqual((await cache.get('empty', async () => [])).value, []);
+  now = 5;
+  assert.equal((await cache.get('empty', async () => ['late'])).cached, true, 'within the short TTL');
+  now = 20;
+  assert.deepEqual((await cache.get('empty', async () => ['found'])).value, ['found'], 'refetched after the short TTL');
+  now = 2000;
+  const kept = await cache.get('empty', async () => []);
+  assert.deepEqual([kept.value, kept.stale, kept.error], [['found'], true, 'the store returned no results this time']);
+  assert.deepEqual((await cache.get('empty', async () => ['again'])).value, ['again'], 'the empty answer was not stored');
+});
+
 test('SearchCache reuses fresh results, refetches after the TTL and falls back to stale data', async () => {
   let now = 0;
   const cache = new SearchCache({ ttlMs: 100, staleMs: 1000, now: () => now });

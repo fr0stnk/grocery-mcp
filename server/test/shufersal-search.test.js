@@ -117,6 +117,7 @@ test('the configured Shufersal search reads directly and falls back to the adapt
   status = 302;
   assert.deepEqual(await store.search.run({ query: 'פסטה', limit: 5, fallback }), ['from adapter']);
   assert.equal(fallbacks, 1);
+  await assert.rejects(store.search.run({ query: 'פסטה', limit: 5, fallback: async () => [] }), /no results from the adapter after the direct search failed/, 'GROC-045: an empty fallback is a store error, not an empty catalog');
   assert.equal(createStores({ ...env, GROCERY_SHUFERSAL_SEARCH: 'adapter' })[0].search.run, undefined);
 });
 

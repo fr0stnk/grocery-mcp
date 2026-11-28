@@ -220,8 +220,9 @@ MCP cannot message a user outside a conversation. For a daily check, a client's 
 `search_all_stores` and `compare_basket` share an in-memory cache (`src/cache.js`), keyed by store, Rami Levy branch and query:
 
 - Each store is asked for a fixed batch of up to 20 results, so a cached search serves any `limit`.
-- Results are reused for 15 minutes.
-- If a fresh fetch fails, results up to 24 hours old are returned with `stale: true` and `fetchedAt`, instead of an error.
+- Results are reused for 15 minutes, an empty result for only 1 minute: a store under load answers some searches with nothing, and that must not hide its products for long.
+- If a fresh fetch fails, results up to 24 hours old are returned with `stale: true` and `fetchedAt`, instead of an error. An empty answer to a query that found products before counts as a failure: the earlier results are returned, marked stale, and the empty answer is not stored.
+- When Shufersal's direct search fails (a timeout or an expired session) and the adapter's search then finds nothing either, that is a store error, not an empty catalog.
 - Concurrent identical searches share one fetch, and each store runs at most 4 searches at once.
 - Carts, orders and status are never cached.
 - Each store's status includes `fetchedAt`, plus `cached: true` when the result came from the cache.
