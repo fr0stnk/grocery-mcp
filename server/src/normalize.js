@@ -30,7 +30,9 @@ const SIZE_RE = new RegExp(
   'u',
 );
 
-const PACK_OF_RE = /(\d+)\s*(?:שקיקים|שקיות|יחידות|יח'?)\s*[*xX×]\s*/u;
+const PACK_OF_RE = /(\d+)\s*(שקיקים|שקיות|מעטפות|יחידות|יח'?)\s*[*xX×]\s*/u;
+// Tea bags in one box are its contents, not a multipack of separate products.
+const BAG_WORDS = /^(?:שקיקים|שקיות|מעטפות)$/u;
 // Words that make a size the size of each item in a pack: "שישייה 1.5 ליטר" is six 1.5 L bottles.
 const PACK_WORDS = [[/שישי(?:י)?(?:ה|ת)/u, 6], [/רביעי(?:י)?(?:ה|ת)/u, 4], [/(?:^|\s)(?:זוג|צמד)(?=\s|$)/u, 2]];
 
@@ -43,7 +45,9 @@ const PACK_WORDS = [[/שישי(?:י)?(?:ה|ת)/u, 6], [/רביעי(?:י)?(?:ה|�
 export function parseSize(text) {
   if (typeof text !== 'string') return null;
   // "25 שקיקים*2 גרם" is 25 bags of 2 g each, written like "25*2 גרם".
-  const normalized = text.replace(/[״]/g, '"').replace(/[׳]/g, "'").replace(PACK_OF_RE, '$1*');
+  const quoted = text.replace(/[״]/g, '"').replace(/[׳]/g, "'");
+  const bags = BAG_WORDS.test(PACK_OF_RE.exec(quoted)?.[2] ?? '');
+  const normalized = quoted.replace(PACK_OF_RE, '$1*');
   const m = SIZE_RE.exec(normalized);
   if (!m) return null;
   const value = Number(m[2].replace(',', '.'));
@@ -52,10 +56,10 @@ export function parseSize(text) {
   const amount = round(count * value * factor, 4);
   if (!(amount > 0)) return null;
   const each = round(value * factor, 4);
-  return { amount, unit, label: `${amount} ${unit}`, ...(count > 1 ? { pack: count, each: `${each} ${unit}` } : {}) };
+  return { amount, unit, label: `${amount} ${unit}`, ...(count > 1 ? { pack: count, each: `${each} ${unit}`, ...(bags ? { bags: true } : {}) } : {}) };
 }
 
-const COUNT_RE = /(\d+)\s*(?:יחידות|יחי'|יח'|יח|שקיקים|שקיות)(?=$|[\s,.;:)\-/*])/u;
+const COUNT_RE = /(\d+)\s*(?:יחידות|יחי'|יח'|יח|שקיקים|שקיות|מעטפות|גלילים|גליל)(?=$|[\s,.;:)\-/*])/u;
 
 /** Reads a pack count such as "12 יחידות" or "ביצים 12 יח גדול L"; a single unit returns null. */
 export function parseCount(text) {
@@ -132,7 +136,7 @@ function item(store, { productId, barcode = null, barcodeInferred = false, name,
     brand: brand || null,
     size: size?.label ?? (count ? `${count} pcs` : null),
     ...(count ? { count } : {}),
-    ...(size?.pack ? { packCount: size.pack, itemSize: size.each } : {}),
+    ...(size?.pack && !size.bags ? { packCount: size.pack, itemSize: size.each } : {}),
     price: p,
     ...(regularPrice != null && p != null && regularPrice > p + 0.005 ? { regularPrice } : {}),
     priceBasis: basis,

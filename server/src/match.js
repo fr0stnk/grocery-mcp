@@ -24,7 +24,7 @@ const HEBREW_PREFIX = /^[והבלמשכ](?=[֐-׿]{3})/u;
  * lemon Zero for "קוקה קולה", Omega-3 for "ביצים", milk chocolate for "חלב".
  */
 const VARIANT_WORDS = new Set([
-  'זירו', 'דיאט', 'דייט', 'לייט', 'לימון', 'בטעם', 'טעם', 'תות', 'וניל', 'שוקו', 'שוקולד', 'אפרסק', 'מנגו', 'קפה',
+  'זירו', 'דיאט', 'דייט', 'לייט', 'לימון', 'בטעם', 'תות', 'וניל', 'שוקו', 'שוקולד', 'אפרסק', 'מנגו', 'קפה',
   'אומגה', 'אורגני', 'אורגנית', 'מלא', 'מלאה', 'חום', 'מופחת', 'מופחתת', 'דל', 'דלת',
   'קפוא', 'קפואה', 'קפואים', 'קפואות', 'מוקפא', 'מוקפאת', 'מוקפאים', 'מוקפאות', 'מעושן', 'מעושנת', 'מתובל', 'מתובלת', 'טחון', 'טחונה',
   'מיובש', 'מיובשים', 'קלוי', 'קלויים', 'מרוסקות', 'מרוסק', 'חתוכות', 'רסק', 'שרי', 'מיני', 'מלח',
@@ -105,6 +105,22 @@ export function wordMatches(term, word) {
 }
 
 const nameWordsOf = (item) => wordsOf(`${item.name ?? ''} ${item.brand ?? ''}`);
+
+// Adjectives that describe a product without saying what it is: "שחור" alone made black grapes a match for black tea.
+const WEAK_WORDS = new Set(['שחור', 'שחורה', 'שחורים', 'שחורות', 'לבן', 'לבנה', 'לבנים', 'לבנות', 'אדום', 'אדומה', 'אדומים', 'אדומות',
+  'ירוק', 'ירוקה', 'ירוקים', 'ירוקות', 'צהוב', 'צהובה', 'צהובים', 'גדול', 'גדולה', 'גדולים', 'גדולות', 'קטן', 'קטנה', 'קטנים', 'קטנות',
+  'טרי', 'טריה', 'טרייה', 'טריים', 'טריות', 'קלאסי', 'קלאסית', 'רגיל', 'רגילה', 'רגילים', 'רגילות', 'מתוק', 'מתוקה', 'חריף', 'חריפה']);
+
+/**
+ * Whether a product is about the query: it matches a query word that names a
+ * thing, or two query words. A shared adjective alone is not enough
+ * ("ענבים שחורים" for "תה שחור").
+ */
+export function isAbout(item, terms) {
+  const strong = terms.filter((t) => !WEAK_WORDS.has(t.word) && !WEAK_WORDS.has(bareOf(t.word)));
+  if (!strong.length || strong.length === terms.length && terms.length < 2) return matchedTerms(item, terms) > 0;
+  return matchedTerms(item, strong) > 0 || matchedTerms(item, terms) >= 2;
+}
 
 /** How many of the query's terms a product's name and brand contain. */
 export function matchedTerms(item, terms) {

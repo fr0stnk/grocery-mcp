@@ -1,7 +1,7 @@
 import { createLimiter, SearchCache } from './cache.js';
 import { compareItems, StoreError } from './normalize.js';
 import { withTimeout } from './stores.js';
-import { matchedTerms, queryTerms, stemOf, withoutPackaging } from './match.js';
+import { isAbout, matchedTerms, queryTerms, stemOf, withoutPackaging } from './match.js';
 
 /** Shared by every request in this process; see cache.js for the freshness rules. */
 export const searchCache = new SearchCache();
@@ -111,9 +111,9 @@ export async function searchAllStores(stores, args = {}, { timeoutMs = 45_000, c
   outcomes.forEach((outcome, i) => {
     const store = selected[i];
     if (outcome.status === 'fulfilled') {
-      const { hit, items: kept, hidden, retriedAs } = outcome.value;
+      const { hit, items: kept, hidden, retriedAs, relevance } = outcome.value;
       const items = kept.slice(0, limit).map((item, index) => ({ ...item, rank: index + 1 }));
-      status[store.id] = { ...storeStatus(hit, items.length), ...(hidden ? { unrelatedHidden: hidden } : {}), ...(retriedAs ? { retriedAs } : {}) };
+      status[store.id] = { ...storeStatus(hit, items.length), ...(hidden ? { unrelatedHidden: hidden } : {}), ...(retriedAs ? { retriedAs } : {}), ...(relevance ? { relevance } : {}) };
       results.push(...items);
     } else {
       const reason = outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason);
@@ -160,8 +160,11 @@ export function relevantOnly(items, query) {
     const text = `${item.name} ${item.brand ?? ''}`.toLocaleLowerCase();
     return terms.every((t) => t.forms.some((f) => text.includes(f)));
   };
-  const kept = items.filter(related);
-  return { kept, hidden: items.length - kept.length };
+  const loose = items.filter(related);
+  // Of those, prefer the products that are about the query; one shared adjective is kept only when nothing else is.
+  const about = foreign ? loose : loose.filter((item) => isAbout(item, terms));
+  const kept = about.length ? about : loose;
+  return { kept, hidden: items.length - kept.length, ...(!foreign && !about.length && loose.length ? { relevance: 'any-word' } : {}) };
 }
 
 /** Singular forms to retry a plural query with: בננות → בננה, עגבניות → עגבניה, תפוחים → תפוח. */
@@ -187,12 +190,12 @@ export async function relevantSearch(store, query, opts = {}) {
   // rarely carry those words, so it is searched without them. Shufersal's names do carry them.
   const sent = store.id === 'rami-levy' && bare ? bare : query;
   const hit = await searchStore(store, sent, opts);
-  const { kept, hidden } = relevantOnly(hit.value, query);
-  if (kept.length) return { hit, items: kept, hidden, ...(sent !== query ? { retriedAs: sent } : {}) };
+  const { kept, hidden, relevance } = relevantOnly(hit.value, query);
+  if (kept.length) return { hit, items: kept, hidden, ...(relevance ? { relevance } : {}), ...(sent !== query ? { retriedAs: sent } : {}) };
   for (const alt of [...new Set([bare, ...singularQueries(bare ?? query)].filter((q) => q && q !== sent))]) {
     const retry = await searchStore(store, alt, opts).catch(() => null);
     const again = retry ? relevantOnly(retry.value, query) : { kept: [] };
-    if (again.kept.length) return { hit: retry, items: again.kept, hidden, retriedAs: alt };
+    if (again.kept.length) return { hit: retry, items: again.kept, hidden, retriedAs: alt, ...(again.relevance ? { relevance: again.relevance } : {}) };
   }
   return { hit, items: [], hidden };
 }

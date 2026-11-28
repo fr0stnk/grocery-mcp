@@ -261,7 +261,7 @@ test('GROC-027: plain Bamba beats birthday, sweet, mixed and Munch editions', ()
 });
 
 test('GROC-024: a pack of tea bags is read as bags × weight, and bag counts are counts', () => {
-  assert.deepEqual(parseSize('25 שקיקים*2 גרם'), { amount: 0.05, unit: 'kg', label: '0.05 kg', pack: 25, each: '0.002 kg' });
+  assert.deepEqual(parseSize('25 שקיקים*2 גרם'), { amount: 0.05, unit: 'kg', label: '0.05 kg', pack: 25, each: '0.002 kg', bags: true });
   assert.equal(parseCount('20 שקיקים'), 20);
 });
 
@@ -270,4 +270,24 @@ test('GROC-028/029: moist wipes, concentrates and flavoured tea are variants', (
   assert.deepEqual(bestCandidates([{ name: 'מרכך כביסה מרוכז' }, { name: 'מרכך כביסה 4 ליטר' }], 'מרכך כביסה').map((x) => x.name), ['מרכך כביסה 4 ליטר']);
   assert.deepEqual(bestCandidates([{ name: 'תה שחור אוכמניות' }, { name: 'תה ירוק נענע' }, { name: 'תה ויסוצקי קלאסיק' }], 'תה').map((x) => x.name), ['תה ויסוצקי קלאסיק']);
   assert.equal(bestCandidates([{ name: 'מגבונים לחים' }], 'מגבונים לחים')[0].unrequested, undefined);
+});
+
+test('GROC-030: a shared adjective later in the name is not relevance, unless nothing else matches', () => {
+  const tea = [{ name: 'תה שחור גולדן צילוני' }, { name: 'ענבים שחורים' }, { name: 'ליפטון תה שחור 100 מעטפות' }];
+  assert.deepEqual(relevantOnly(tea, 'תה שחור גולדן צילוני').kept.map((x) => x.name), ['תה שחור גולדן צילוני', 'ליפטון תה שחור 100 מעטפות']);
+  assert.deepEqual(relevantOnly([{ name: 'פרי ניר שמן זית כתית' }], 'שמן זית').kept.length, 1, 'a two-word brand before the product is kept by the two-word rule');
+  assert.deepEqual(relevantOnly([{ name: 'ענבים שחורים' }, { name: 'שוקולד מריר' }], 'ענבים').kept.map((x) => x.name), ['ענבים שחורים'], 'a single-word query is unchanged');
+  const fallback = relevantOnly([{ name: 'ענבים שחורים' }], 'תה שחור');
+  assert.deepEqual([fallback.kept.length, fallback.relevance], [1, 'any-word'], 'the any-word fallback is reported');
+});
+
+test('GROC-032/033: tea bags are not a multipack, rolls and envelopes are counts, and "טעם" alone is not a variant', () => {
+  const [tea] = normalizeShufersalRaw([shufersalRaw({ code: 'P_4605246003523', name: 'תה שחור גולדן צילוני', unitDescription: '25 שקיקים*2 גרם', sellingMethod: { code: 'BY_UNIT' }, price: { value: 14.9 } })]);
+  assert.deepEqual([tea.size, tea.packCount], ['0.05 kg', undefined]);
+  assert.equal(bestCandidates([tea], 'תה')[0].unrequested, undefined);
+  const [rolls] = normalizeShufersalRaw([shufersalRaw({ code: 'P_1', name: 'נייר טואלט דו שכבתי', unitDescription: '32 גלילים', sellingMethod: { code: 'BY_UNIT' }, price: { value: 29.9 } })]);
+  assert.deepEqual([rolls.count, rolls.size], [32, '32 pcs']);
+  assert.equal(parseCount('ליפטון תה שחור 100 מעטפות'), 100);
+  assert.equal(bestCandidates([{ name: 'תה שחור קלאסי טעם עשיר ויסוצקי 120 שקיקים' }], 'תה שחור')[0].unrequested, undefined);
+  assert.ok(bestCandidates([{ name: 'תה בטעם לימון' }], 'תה')[0].unrequested);
 });
