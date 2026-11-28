@@ -230,6 +230,13 @@ test('a store without the requested size reports the nearest one, per litre', as
   assert.ok(out.notes.some((n) => /Rami Levy has no 1 L .*\(₪7.45 per L\)/.test(n)));
 });
 
+test('GROC-046: sugar in a jar loses to the plain kilo', () => {
+  const sugars = [{ name: 'סוכר לבן בצנצנת', size: '1 kg', price: 12.9 }, { name: 'סוכר לבן', size: '1 kg', price: 5.5 }];
+  assert.deepEqual(bestCandidates(sugars, 'סוכר 1 ק"ג').map((x) => x.name), ['סוכר לבן']);
+  assert.deepEqual(bestCandidates([sugars[0]], 'סוכר')[0].unrequested, ['בצנצנת']);
+  assert.equal(bestCandidates([sugars[0]], 'סוכר בצנצנת')[0].unrequested, undefined, 'asked for');
+});
+
 test('GROC-008: a flavoured bread loses to plain bread, and is flagged when it is all a store has', () => {
   const breads = [{ name: 'לחם מחמצת עגבניות', price: 20.9 }, { name: 'לחם מחמצת', price: 18.9 }];
   assert.deepEqual(bestCandidates(breads, 'לחם').map((x) => x.name), ['לחם מחמצת']);
