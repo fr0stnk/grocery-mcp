@@ -125,7 +125,7 @@ python3 scripts/setup_deploy.py --host <ssh-host> --deploy-host <server-tailnet-
 
 1. It backs up `.env` and the tunnel files, then writes the new values together with `GROCERY_IMAGE_TAG`.
 2. It checks out the tag and its submodules.
-3. It pulls that version's images and restarts `grocery-http` and the configured tunnels.
+3. It pulls that version's images and restarts `grocery-http` and the configured tunnels, and `pocket-id` (profile `auth`) when it already exists on the server. Pocket ID is started once by hand, and its image is pinned by digest, so a deploy recreates it only when a release changes its image or settings.
 4. It waits up to 4 minutes for `/health` and each tunnel's `/readyz`.
 
 On any failure it restores the backups and the previous commit and restarts the services. It never prints secret values. Its tests stub git and Docker.

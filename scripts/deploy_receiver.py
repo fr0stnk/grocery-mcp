@@ -15,6 +15,7 @@ and then:
   2. writes the given settings, plus GROCERY_IMAGE_TAG for the release,
   3. checks out the release tag and its submodules,
   4. pulls that release's images and restarts grocery-http and the tunnels,
+     and pocket-id once it has been started by hand (profile auth),
   5. waits until the server and every tunnel report ready.
 If steps 3 to 5 fail, it restores the backups and the previous commit and
 restarts the services on them. Secret values are never printed.
@@ -142,13 +143,15 @@ def active_tunnels(root):
     return [name for name, (config_file, _, _, _) in TUNNELS.items() if (root / "tunnel" / config_file).exists()]
 
 
-def compose(root, tunnels, *args):
+def compose(root, tunnels, *args, auth=False):
     files = ["-f", "compose.yaml"]
     if (root / "compose.override.yaml").exists():
         files += ["-f", "compose.override.yaml"]
     files += ["-f", "compose.tunnel.yaml"]
     if "extra" in tunnels:
         files += ["--profile", "extra"]
+    if auth:
+        files += ["--profile", "auth"]
     return ["docker", "compose"] + files + list(args)
 
 
@@ -186,6 +189,14 @@ def wait_ready(tunnels, timeout_s=READY_TIMEOUT_S, fetch=fetch_text, sleep=time.
             sleep(3)
 
 
+def has_pocket_id(root, tunnels, runner):
+    """Whether pocket-id was set up on this host: sign-in is enabled by starting it once by hand."""
+    try:
+        return bool(runner(root, compose(root, tunnels, "ps", "--all", "--quiet", "pocket-id", auth=True)).strip())
+    except DeployError:
+        return False
+
+
 def deploy(request, root=ROOT, runner=run, ready=wait_ready):
     backup = Backup()
     previous = runner(root, ["git", "rev-parse", "HEAD"]).strip()
@@ -200,11 +211,15 @@ def deploy(request, root=ROOT, runner=run, ready=wait_ready):
     write_settings(root, request, backup)
     tunnels = active_tunnels(root)
     services = ["grocery-http"] + [TUNNELS[n][3] for n in tunnels]
+    # Its image is pinned by digest, so `up` recreates it only when the release changes its image or settings.
+    auth = has_pocket_id(root, tunnels, runner)
+    if auth:
+        services.append("pocket-id")
     try:
         runner(root, ["git", "-c", "advice.detachedHead=false", "checkout", "--quiet", "--detach", request["ref"]])
         runner(root, ["git", "submodule", "update", "--init", "--recursive", "--quiet"])
-        runner(root, compose(root, tunnels, "pull", "--quiet", *services))
-        runner(root, compose(root, tunnels, "up", "-d", *services))
+        runner(root, compose(root, tunnels, "pull", "--quiet", *services, auth=auth))
+        runner(root, compose(root, tunnels, "up", "-d", *services, auth=auth))
         ready(tunnels)
     except Exception as error:
         log("Deploy failed: {}".format(error))
@@ -213,7 +228,7 @@ def deploy(request, root=ROOT, runner=run, ready=wait_ready):
         try:
             runner(root, ["git", "-c", "advice.detachedHead=false", "checkout", "--quiet", "--detach", previous])
             runner(root, ["git", "submodule", "update", "--init", "--recursive", "--quiet"])
-            runner(root, compose(root, active_tunnels(root), "up", "-d", *services))
+            runner(root, compose(root, active_tunnels(root), "up", "-d", *services, auth=auth))
             log("Rolled back.")
         except Exception as rollback_error:
             log("Rollback also failed: {}".format(rollback_error))

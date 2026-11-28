@@ -53,11 +53,13 @@ class Deploy(unittest.TestCase):
         (self.root / "compose.override.yaml").write_text("services: {}\n")
         self.commands = []
 
-    def runner(self, fail_on=None):
+    def runner(self, fail_on=None, pocket_id=False):
         def run(root, command):
             self.commands.append(command)
             if fail_on and fail_on in command:
                 raise receiver.DeployError("simulated failure")
+            if pocket_id and "ps" in command:
+                return "0123abcd\n"
             return "abc1234def\n" if command[:2] == ["git", "rev-parse"] else ""
         return run
 
@@ -88,6 +90,15 @@ class Deploy(unittest.TestCase):
         self.assertIn("127.0.0.1:8793", (self.root / "tunnel" / "extra.yaml").read_text())
         self.assertEqual(self.commands[-1][-3:], ["grocery-http", "tunnel", "tunnel-extra"])
         self.assertIn("--profile", self.commands[-1])
+
+    def test_restarts_pocket_id_only_where_it_was_set_up(self):
+        self.deploy(request())
+        self.assertNotIn("pocket-id", self.commands[-1])
+        self.commands.clear()
+        self.deploy(request(), pocket_id=True)
+        up = self.commands[-1]
+        self.assertEqual(up[-5:], ["up", "-d", "grocery-http", "tunnel", "pocket-id"])
+        self.assertEqual(up[up.index("auth") - 1], "--profile")
 
     def test_a_tunnel_without_a_key_needs_one_on_the_server(self):
         with self.assertRaisesRegex(receiver.DeployError, "no key on the server"):
