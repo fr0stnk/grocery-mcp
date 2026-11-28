@@ -252,9 +252,12 @@ test('a live executor in another process holds its account until exit, and an ab
     { stdio: ['ignore', 'pipe', 'inherit'] });
   t.after(() => child.kill('SIGKILL'));
   const exited = once(child, 'exit');
-  await Promise.race([once(child.stdout, 'data'), exited.then(() => assert.fail('cart executor exited early'))]);
+  const [ready] = await Promise.race([once(child.stdout, 'data'), exited.then(() => assert.fail('cart executor exited early'))]);
+  assert.match(String(ready), /applied/);
   const c = await f.connect({ database: f.db2 });
   for (let attempt = 0; attempt < 8; attempt++) {
+    assert.equal(child.exitCode, null, 'the independent lock holder is alive');
+    assert.equal(child.signalCode, null, 'the independent lock holder has not been killed');
     assert.equal(code(await call(c, ADD, added('crash'))), 'CART_SYNC_IN_PROGRESS');
     assert.equal(code(await call(c, REMOVE, { productId: '42' })), 'CART_SYNC_IN_PROGRESS');
   }

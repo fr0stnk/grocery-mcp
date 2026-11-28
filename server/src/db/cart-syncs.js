@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { DatabaseSync } from 'node:sqlite';
 import { StoreError } from '../normalize.js';
 
@@ -32,12 +33,28 @@ function acquire(file, accountId) {
   const digest = crypto.createHash('sha256').update(accountId).digest('hex');
   const dir = `${fs.realpathSync(file)}.cart-locks`;
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  if (process.platform === 'linux') {
+    const fd = fs.openSync(path.join(dir, `${digest}.lock`), 'a', 0o600);
+    try {
+      // flock(2) locks the open file description shared with fd 3. The
+      // combined process retains that lock after the helper exits.
+      const lock = spawnSync('flock', ['-n', '-x', '-E', '75', '3'], {
+        stdio: ['ignore', 'ignore', 'ignore', fd], timeout: 3000,
+      });
+      if (lock.status === 75) throw inProgress();
+      if (lock.status !== 0) throw cartJournalUnavailable();
+      return () => fs.closeSync(fd);
+    } catch (error) {
+      fs.closeSync(fd);
+      throw error;
+    }
+  }
   const gate = new DatabaseSync(path.join(dir, `${digest}.db`));
   try {
     // Hold an exclusive transaction on this empty gate database. The cart
     // journal lives in a separate database and commits each update immediately.
     gate.exec('PRAGMA busy_timeout = 0; BEGIN EXCLUSIVE;');
-    return gate;
+    return () => gate.close();
   } catch (error) {
     gate.close();
     if ([5, 6].includes(error.errcode)) throw inProgress();
@@ -79,9 +96,9 @@ export function createCartJournal(db, file) {
       const hash = key === null ? null : requestHash(operation, args);
       const replay = cached(find(accountId, key), hash);
       if (replay) return replay;
-      let gate;
+      let release;
       try {
-        gate = acquire(file, accountId);
+        release = acquire(file, accountId);
       } catch (error) {
         if (error.code !== 'CART_SYNC_IN_PROGRESS') throw cartJournalUnavailable();
         const completed = cached(find(accountId, key), hash);
@@ -145,7 +162,7 @@ export function createCartJournal(db, file) {
         }
         return response;
       } finally {
-        gate.close();
+        release();
       }
     },
   };
