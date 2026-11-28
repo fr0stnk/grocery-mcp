@@ -306,3 +306,11 @@ test('GROC-037: bags written without a multiplication sign, and Earl Grey is a f
   assert.deepEqual(parseSize('תה ארל גריי ליפטון 100שקיקים 1.6גרם'), { amount: 0.16, unit: 'kg', label: '0.16 kg', pack: 100, each: '0.0016 kg', bags: true });
   assert.deepEqual(bestCandidates([{ name: 'תה שחור ארל גריי' }, { name: 'תה שחור קלאסי' }], 'תה שחור').map((x) => x.name), ['תה שחור קלאסי']);
 });
+
+test('GROC-039: a bag count followed by a box weight is the box, not each bag', () => {
+  assert.deepEqual(parseSize("ליפטון ארל גריי 25 מעטפות 40גר'"), { amount: 0.04, unit: 'kg', label: '0.04 kg', bags: true });
+  assert.equal(parseSize('תה ארל גריי ליפטון 100שקיקים 1.6גרם').amount, 0.16, 'a few grams is each bag');
+  assert.equal(parseSize('25 שקיקים*50 גרם').amount, 1.25, 'a multiplication sign always means each');
+  assert.deepEqual(bestCandidates([{ name: 'ירח מתוק מעדן חלב+אורז3%' }], 'חלב 3%'), [], 'rice pudding is not milk');
+  assert.ok(bestCandidates([{ name: 'חלב מעדן וניל' }], 'חלב')[0].unrequested, 'a dessert named after milk is a variant');
+});

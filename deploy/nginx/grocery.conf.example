@@ -15,6 +15,7 @@ server {
     ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
 
     client_max_body_size 4m;
+    add_header Strict-Transport-Security "max-age=31536000" always;
 
     # Only the MCP endpoint, its protected-resource metadata and the health check are served.
     location = /mcp {
@@ -60,12 +61,14 @@ server {
     ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
 
     client_max_body_size 4m;
+    add_header Strict-Transport-Security "max-age=31536000" always;
 
     location / {
         proxy_pass http://127.0.0.1:1411;
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        # Pocket ID trusts this header (TRUST_PROXY), so pass only the real peer, never a client-sent chain.
+        proxy_set_header X-Forwarded-For $remote_addr;
         # Pocket ID's documented buffer sizes; smaller ones fail with "upstream sent too big header".
         proxy_buffer_size 256k;
         proxy_buffers 4 512k;

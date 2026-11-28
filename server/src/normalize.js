@@ -34,6 +34,7 @@ const SIZE_RE = new RegExp(
 const PACK_OF_RE = /(\d+)\s*(?:(שקיקים|שקיות|מעטפות)\s*[*xX×]?|(יחידות|יח'?)\s*[*xX×])\s*(?=\d)/u;
 // Tea bags in one box are its contents, not a multipack of separate products.
 const BAG_WORDS = /^(?:שקיקים|שקיות|מעטפות)$/u;
+const MAX_BAG_KG = 0.005;
 // Words that make a size the size of each item in a pack: "שישייה 1.5 ליטר" is six 1.5 L bottles.
 const PACK_WORDS = [[/שישי(?:י)?(?:ה|ת)/u, 6], [/רביעי(?:י)?(?:ה|ת)/u, 4], [/(?:^|\s)(?:זוג|צמד)(?=\s|$)/u, 2]];
 
@@ -47,7 +48,14 @@ export function parseSize(text) {
   if (typeof text !== 'string') return null;
   // "25 שקיקים*2 גרם" is 25 bags of 2 g each, written like "25*2 גרם".
   const quoted = text.replace(/[״]/g, '"').replace(/[׳]/g, "'");
-  const bags = BAG_WORDS.test(PACK_OF_RE.exec(quoted)?.[2] ?? '');
+  const packOf = PACK_OF_RE.exec(quoted);
+  const bags = BAG_WORDS.test(packOf?.[2] ?? '');
+  // Without a multiplication sign the weight may be each bag's or the whole box's: "100שקיקים 1.6גרם" is
+  // per bag, "25 מעטפות 40גר'" is the box. A tea bag weighs a few grams, so more than 5 g is the total.
+  if (bags && !/[*xX×]/u.test(packOf[0])) {
+    const rest = parseSize(quoted.slice(packOf.index + packOf[0].length));
+    if (rest && rest.unit === 'kg' && rest.amount > MAX_BAG_KG) return { ...rest, bags: true };
+  }
   const normalized = quoted.replace(PACK_OF_RE, '$1*');
   const m = SIZE_RE.exec(normalized);
   if (!m) return null;
