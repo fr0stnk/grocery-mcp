@@ -34,9 +34,9 @@ function acquire(file, accountId) {
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   const gate = new DatabaseSync(path.join(dir, `${digest}.db`));
   try {
-    // Write a database page so even a new gate retains its exclusive lock
-    // after COMMIT. Closing the connection or dying releases it.
-    gate.exec('PRAGMA busy_timeout = 0; PRAGMA locking_mode = EXCLUSIVE; BEGIN EXCLUSIVE; PRAGMA user_version = 1; COMMIT;');
+    // Hold an exclusive transaction on this empty gate database. The cart
+    // journal lives in a separate database and commits each update immediately.
+    gate.exec('PRAGMA busy_timeout = 0; BEGIN EXCLUSIVE;');
     return gate;
   } catch (error) {
     gate.close();

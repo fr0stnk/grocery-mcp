@@ -253,12 +253,12 @@ test('a live executor in another process holds its account until exit, and an ab
   t.after(() => child.kill('SIGKILL'));
   const exited = once(child, 'exit');
   await Promise.race([once(child.stdout, 'data'), exited.then(() => assert.fail('cart executor exited early'))]);
-  const lockDir = `${f.file}.cart-locks`;
-  const [lockFile] = fs.readdirSync(lockDir).filter((name) => name.endsWith('.db'));
-  assert.ok(fs.statSync(path.join(lockDir, lockFile)).size > 0, 'the first executor wrote a page to the gate');
   const c = await f.connect({ database: f.db2 });
-  assert.equal(code(await call(c, ADD, added('crash'))), 'CART_SYNC_IN_PROGRESS');
-  assert.equal(code(await call(c, REMOVE, { productId: '42' })), 'CART_SYNC_IN_PROGRESS');
+  for (let attempt = 0; attempt < 8; attempt++) {
+    assert.equal(code(await call(c, ADD, added('crash'))), 'CART_SYNC_IN_PROGRESS');
+    assert.equal(code(await call(c, REMOVE, { productId: '42' })), 'CART_SYNC_IN_PROGRESS');
+  }
+  assert.equal(f.invocations.length, 0);
   child.kill('SIGKILL');
   await exited;
   assert.equal(code(await call(c, ADD, added('crash'))), 'CART_SYNC_UNKNOWN');
