@@ -133,7 +133,7 @@ export function createTokenVerifier({ issuer, audience, fetchJson = defaultFetch
     const signed = Buffer.from(`${parts[0]}.${parts[1]}`);
     const signature = Buffer.from(parts[2], 'base64url');
     const options = { key, ...(alg.ec ? { dsaEncoding: 'ieee-p1363' } : {}), ...(alg.pss ? { padding: crypto.constants.RSA_PKCS1_PSS_PADDING, saltLength: crypto.constants.RSA_PSS_SALTLEN_DIGEST } : {}) };
-    let valid = false;
+    let valid;
     try {
       valid = crypto.verify(alg.hash, signed, options, signature);
     } catch {
