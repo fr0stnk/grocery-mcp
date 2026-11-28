@@ -95,20 +95,36 @@ function constructOf(word) {
 
 // Query words that make a variant word part of the request: plant milks are sold as "משקה" (a drink).
 const IMPLIES = { חלב: ['משקה'] };
-// Query words with another form in product names: "נוזל לניקוי חלונות" is a "מנקה חלונות".
-const SYNONYMS = { מנקה: ['ניקוי'], מנקים: ['ניקוי'] };
+// Query words with another form in product names: "דייסה" is usually listed as "דייסת".
+const SYNONYMS = { מנקה: ['ניקוי'], מנקים: ['ניקוי'], דייסה: ['דייסת'], דייסת: ['דייסה'] };
+const PORRIDGE = new Set(['דייסה', 'דייסת']);
+const INFANT = new Set(['תינוק', 'תינוקות']);
+const INFANT_CEREAL_BRANDS = ['מטרנה', 'materna'];
+
+export function isBabyPorridgeQuery(query) {
+  const [head, ...rest] = wordsOf(query);
+  return PORRIDGE.has(head) && rest.some((word) => INFANT.has(bareOf(word)));
+}
+
+export function isBabyPorridge(item) {
+  const name = wordsOf(item.name);
+  return name.slice(0, 2).some((word) => PORRIDGE.has(word)) &&
+    [...name, ...wordsOf(item.brand)].some((word) => INFANT.has(bareOf(word)) || INFANT_CEREAL_BRANDS.includes(word));
+}
 
 /**
  * The words of a query that say what the product is, each with the forms it
  * may take in a product name. Numbers, sizes, units and grades are left out.
  */
 export function queryTerms(query) {
+  const babyPorridge = isBabyPorridgeQuery(query);
   return wordsOf(query)
     .filter((w) => !/\d/.test(w) && !UNIT_WORDS.has(w) && !GRADE.test(w) && !isPackaging(w))
     .map((w) => {
       const bare = bareOf(w);
+      const audience = babyPorridge && INFANT.has(bare) ? INFANT_CEREAL_BRANDS : [];
       // A leading ב/ה/ו may be a prefix ("בחלב") or part of the word ("בננות"), so both readings count.
-      return { word: w, forms: [...new Set([w, bare, stemOf(w), stemOf(bare), constructOf(w), constructOf(bare), ...(SYNONYMS[w] ?? SYNONYMS[bare] ?? [])].filter(Boolean))] };
+      return { word: w, forms: [...new Set([w, bare, stemOf(w), stemOf(bare), constructOf(w), constructOf(bare), ...(SYNONYMS[w] ?? SYNONYMS[bare] ?? []), ...audience].filter(Boolean))] };
     });
 }
 

@@ -1,7 +1,7 @@
 import { createLimiter, SearchCache } from './cache.js';
 import { compareItems, StoreError } from './normalize.js';
 import { withTimeout } from './stores.js';
-import { cleanQuery, isAbout, matchedTerms, queryTerms, stemOf, strongTerms, withoutPackaging } from './match.js';
+import { cleanQuery, isAbout, isBabyPorridge, isBabyPorridgeQuery, matchedTerms, queryTerms, stemOf, strongTerms, withoutPackaging } from './match.js';
 
 /** Shared by every request in this process; see cache.js for the freshness rules. */
 export const searchCache = new SearchCache();
@@ -167,7 +167,8 @@ export function relevantOnly(items, query) {
     const text = `${item.name} ${item.brand ?? ''}`.toLocaleLowerCase();
     return terms.every((t) => t.forms.some((f) => text.includes(f)));
   };
-  const loose = items.filter(related);
+  const babyPorridge = isBabyPorridgeQuery(query);
+  const loose = items.filter((item) => (!babyPorridge || isBabyPorridge(item)) && related(item));
   // Of those, prefer the products that are about the query. When none is, products sharing at least one naming
   // word are kept (relevance: any-word); a shared adjective alone ("שחור": grapes, phones) never is.
   const about = foreign ? loose : loose.filter((item) => isAbout(item, terms));
@@ -202,7 +203,8 @@ export async function relevantSearch(store, query, opts = {}) {
   const hit = await searchStore(store, sent, opts);
   const { kept, hidden, relevance } = relevantOnly(hit.value, query);
   if (kept.length) return { hit, items: kept, hidden, ...(relevance ? { relevance } : {}), ...(sent !== query ? { retriedAs: sent } : {}) };
-  for (const alt of [...new Set([bare, ...singularQueries(bare ?? query)].filter((q) => q && q !== sent))]) {
+  const construct = isBabyPorridgeQuery(query) ? (bare ?? query).replace(/דייסה/u, 'דייסת') : null;
+  for (const alt of [...new Set([construct, bare, ...singularQueries(bare ?? query)].filter((q) => q && q !== sent))]) {
     const retry = await searchStore(store, alt, opts).catch(() => null);
     const again = retry ? relevantOnly(retry.value, query) : { kept: [] };
     if (again.kept.length) return { hit: retry, items: again.kept, hidden, retriedAs: alt, ...(again.relevance ? { relevance: again.relevance } : {}) };

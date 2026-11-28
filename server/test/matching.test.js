@@ -269,6 +269,41 @@ test('GROC-046: plain white sugar bags beat a shared Golden Classic barcode in c
   assert.deepEqual(await lookup('סוכר בצנצנת 1 ק״ג'), ['P_3643387', '2792', true]);
 });
 
+test('GROC-047: baby porridge finds the construct form in both stores and requires infant cereal', async () => {
+  const calls = [];
+  const cereals = {
+    shufersal: { productId: 'P_6992208', name: 'דייסת מטרנה 8 דגנים', brand: 'מטרנה' },
+    'rami-levy': { productId: '3880', name: 'מטרנה דייסת 8 דגנים מעורבים 200 גרם' },
+  };
+  const stores = Object.entries(cereals).map(([id, cereal]) => ({
+    id, label: id, search: { maxLimit: 20, run: async ({ query }) => {
+      calls.push([id, query]);
+      const candidates = [{ productId: 'wash', name: 'שמפו לתינוקות ולילדים' }];
+      if (query === 'דייסת לתינוקות') {
+        candidates.push(
+          { productId: 'adult', name: 'דייסת שיבולת שועל' },
+          { productId: 'formula', name: 'מטרנה תרכובת מזון לתינוקות' },
+        );
+        if (id === 'shufersal' || !withoutRamiCereal) candidates.push(cereal);
+      }
+      return candidates.map((p) => ({ ...p, store: id, price: 10, priceBasis: 'unit', inStock: true }));
+    } },
+  }));
+  const args = { items: [{ query: 'דייסה לתינוקות', quantity: 1 }] };
+  let withoutRamiCereal = false;
+  const { items: [line] } = await compareBasket(stores, args, { cache: new SearchCache() });
+  assert.deepEqual([line.offers.shufersal?.productId, line.offers['rami-levy']?.productId], ['P_6992208', '3880']);
+  for (const id of Object.keys(cereals)) {
+    assert.deepEqual(calls.filter(([store]) => store === id).map(([, query]) => query), ['דייסה לתינוקות', 'דייסת לתינוקות']);
+  }
+
+  withoutRamiCereal = true;
+  const { items: [missing] } = await compareBasket(stores, args, { cache: new SearchCache() });
+  assert.equal(missing.offers['rami-levy'], null, 'regular porridge and other products for infants are ineligible');
+  const explicit = { productId: 'baby-cereal', name: 'דייסת אורז לתינוקות' };
+  assert.deepEqual(relevantOnly([explicit], 'דייסה לתינוקות').kept, [explicit]);
+});
+
 test('GROC-008: a flavoured bread loses to plain bread, and is flagged when it is all a store has', () => {
   const breads = [{ name: 'לחם מחמצת עגבניות', price: 20.9 }, { name: 'לחם מחמצת', price: 18.9 }];
   assert.deepEqual(bestCandidates(breads, 'לחם').map((x) => x.name), ['לחם מחמצת']);
