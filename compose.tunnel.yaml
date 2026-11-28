@@ -116,6 +116,13 @@ services:
       - TRUST_PROXY=${POCKET_ID_TRUST_PROXY:-127.0.0.1}
       # Hosts Pocket ID may fetch client metadata documents (CIMD) from, comma-separated; see deploy/README.md.
       - OUTBOUND_ALLOWED_HOSTS_CLIENT_METADATA=${POCKET_ID_METADATA_HOSTS:-}
+    # The image's own healthcheck probes localhost, which is wrong when HOST is a bridge gateway.
+    healthcheck:
+      test: ["CMD", "/app/pocket-id", "healthcheck", "--endpoint", "http://${POCKET_ID_HOST:-127.0.0.1}:1411"]
+      interval: 90s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
     volumes:
       - pocket-id-data:/app/data
     logging:
