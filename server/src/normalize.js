@@ -30,7 +30,8 @@ const SIZE_RE = new RegExp(
   'u',
 );
 
-const PACK_OF_RE = /(\d+)\s*(שקיקים|שקיות|מעטפות|יחידות|יח'?)\s*[*xX×]\s*/u;
+// "25 שקיקים*2 גרם", and for bags also "100שקיקים 1.6גרם" with no multiplication sign.
+const PACK_OF_RE = /(\d+)\s*(?:(שקיקים|שקיות|מעטפות)\s*[*xX×]?|(יחידות|יח'?)\s*[*xX×])\s*(?=\d)/u;
 // Tea bags in one box are its contents, not a multipack of separate products.
 const BAG_WORDS = /^(?:שקיקים|שקיות|מעטפות)$/u;
 // Words that make a size the size of each item in a pack: "שישייה 1.5 ליטר" is six 1.5 L bottles.

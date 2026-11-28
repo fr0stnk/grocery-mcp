@@ -1,7 +1,7 @@
 import { createLimiter, SearchCache } from './cache.js';
 import { compareItems, StoreError } from './normalize.js';
 import { withTimeout } from './stores.js';
-import { isAbout, matchedTerms, queryTerms, stemOf, withoutPackaging } from './match.js';
+import { isAbout, matchedTerms, queryTerms, stemOf, strongTerms, withoutPackaging } from './match.js';
 
 /** Shared by every request in this process; see cache.js for the freshness rules. */
 export const searchCache = new SearchCache();
@@ -168,10 +168,13 @@ export function relevantOnly(items, query) {
     return terms.every((t) => t.forms.some((f) => text.includes(f)));
   };
   const loose = items.filter(related);
-  // Of those, prefer the products that are about the query; one shared adjective is kept only when nothing else is.
+  // Of those, prefer the products that are about the query. When none is, products sharing at least one naming
+  // word are kept (relevance: any-word); a shared adjective alone ("שחור": grapes, phones) never is.
   const about = foreign ? loose : loose.filter((item) => isAbout(item, terms));
-  const kept = about.length ? about : loose;
-  return { kept, hidden: items.length - kept.length, ...(!foreign && !about.length && loose.length ? { relevance: 'any-word' } : {}) };
+  const strong = strongTerms(terms);
+  const fallback = about.length || foreign ? [] : loose.filter((item) => !strong.length || matchedTerms(item, strong) > 0);
+  const kept = about.length ? about : fallback;
+  return { kept, hidden: items.length - kept.length, ...(!about.length && fallback.length ? { relevance: 'any-word' } : {}) };
 }
 
 /** Singular forms to retry a plural query with: בננות → בננה, עגבניות → עגבניה, תפוחים → תפוח. */

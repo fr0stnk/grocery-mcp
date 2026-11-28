@@ -274,11 +274,12 @@ test('GROC-028/029: moist wipes, concentrates and flavoured tea are variants', (
 
 test('GROC-030: a shared adjective later in the name is not relevance, unless nothing else matches', () => {
   const tea = [{ name: 'תה שחור גולדן צילוני' }, { name: 'ענבים שחורים' }, { name: 'ליפטון תה שחור 100 מעטפות' }];
-  assert.deepEqual(relevantOnly(tea, 'תה שחור גולדן צילוני').kept.map((x) => x.name), ['תה שחור גולדן צילוני', 'ליפטון תה שחור 100 מעטפות']);
+  assert.deepEqual(relevantOnly([...tea, { name: 'סוכר גולדן קלאסי' }], 'תה שחור גולדן צילוני').kept.map((x) => x.name), ['תה שחור גולדן צילוני'], 'GROC-038: half the naming words, so no golden sugar');
   assert.deepEqual(relevantOnly([{ name: 'פרי ניר שמן זית כתית' }], 'שמן זית').kept.length, 1, 'a two-word brand before the product is kept by the two-word rule');
   assert.deepEqual(relevantOnly([{ name: 'ענבים שחורים' }, { name: 'שוקולד מריר' }], 'ענבים').kept.map((x) => x.name), ['ענבים שחורים'], 'a single-word query is unchanged');
-  const fallback = relevantOnly([{ name: 'ענבים שחורים' }], 'תה שחור');
-  assert.deepEqual([fallback.kept.length, fallback.relevance], [1, 'any-word'], 'the any-word fallback is reported');
+  assert.deepEqual(relevantOnly([{ name: 'ענבים שחורים' }, { name: '17 256 שחור' }], 'ליפטון תה שחור').kept, [], 'GROC-038: an adjective alone is never relevance, even as a fallback');
+  const fallback = relevantOnly([{ name: 'תה ירוק' }], 'ליפטון תה שחור גולדן');
+  assert.deepEqual([fallback.kept.length, fallback.relevance], [1, 'any-word'], 'one naming word is the reported fallback');
 });
 
 test('GROC-032/033: tea bags are not a multipack, rolls and envelopes are counts, and "טעם" alone is not a variant', () => {
@@ -299,4 +300,9 @@ test('GROC-035: sorted by price, a product with another percentage does not top 
     const out = await searchAllStores([st('rami-levy', list)], { query: 'חלב 3%', sortBy }, { cache: new SearchCache() });
     assert.deepEqual(out.results.map((r) => r.productId), ['3', '1'], sortBy);
   }
+});
+
+test('GROC-037: bags written without a multiplication sign, and Earl Grey is a flavour', () => {
+  assert.deepEqual(parseSize('תה ארל גריי ליפטון 100שקיקים 1.6גרם'), { amount: 0.16, unit: 'kg', label: '0.16 kg', pack: 100, each: '0.0016 kg', bags: true });
+  assert.deepEqual(bestCandidates([{ name: 'תה שחור ארל גריי' }, { name: 'תה שחור קלאסי' }], 'תה שחור').map((x) => x.name), ['תה שחור קלאסי']);
 });

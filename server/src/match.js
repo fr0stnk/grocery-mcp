@@ -36,7 +36,7 @@ const VARIANT_WORDS = new Set([
   'הולדת', 'מתוקה', 'מתוק', 'מיקס', 'ביסלי', 'בסלי', 'מאנצ',
   // Moist wipes are not toilet paper, a concentrate is not the regular liquid, and flavoured tea is not plain tea.
   'לח', 'לחה', 'לחים', 'לחות', 'מרוכז', 'מרוכזת', 'מרוכזים',
-  'אוכמניות', 'נענע', 'יסמין', 'לימונית', 'לואיזה', 'קמומיל', 'מליסה',
+  'אוכמניות', 'נענע', 'יסמין', 'לימונית', 'לואיזה', 'קמומיל', 'מליסה', 'ארל', 'גריי', 'ברגמוט',
   'מגב', 'מגבון', 'מגבונים', 'כפול', 'צדדי', 'מגנטי', 'ספוג', 'ספוגים', 'מברשת', 'מתקן', 'עוגיות', 'קרקרים', 'צ\'יפס',
   'חומץ', 'חמוץ', 'חמוצים', 'כבוש', 'כבושים', 'קוביות', 'מיובשות', 'פולפה', 'משומר', 'משומרות', 'שימורים',
   'סושי', 'ריזוטו', 'סטיקי',
@@ -117,9 +117,15 @@ const WEAK_WORDS = new Set(['שחור', 'שחורה', 'שחורים', 'שחור�
  * ("ענבים שחורים" for "תה שחור").
  */
 export function isAbout(item, terms) {
-  const strong = terms.filter((t) => !WEAK_WORDS.has(t.word) && !WEAK_WORDS.has(bareOf(t.word)));
-  if (!strong.length || strong.length === terms.length && terms.length < 2) return matchedTerms(item, terms) > 0;
-  return matchedTerms(item, strong) > 0 || matchedTerms(item, terms) >= 2;
+  const strong = strongTerms(terms);
+  if (!strong.length) return matchedTerms(item, terms) > 0;
+  // A longer query names a specific product: half its naming words must be there ("סוכר גולדן" is not "תה שחור גולדן צילוני").
+  return matchedTerms(item, strong) >= Math.max(1, Math.ceil(strong.length / 2));
+}
+
+/** The query terms that name a thing rather than describe it. */
+export function strongTerms(terms) {
+  return terms.filter((t) => !WEAK_WORDS.has(t.word) && !WEAK_WORDS.has(bareOf(t.word)));
 }
 
 /** How many of the query's terms a product's name and brand contain. */
