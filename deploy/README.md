@@ -10,6 +10,7 @@ The sign-in service itself is the `pocket-id` service in `../compose.tunnel.yaml
 
 - It is pinned to `ghcr.io/pocket-id/pocket-id:v2.19.3-distroless` by digest, and runs as Pocket ID's own non-root user with a read-only filesystem, no capabilities and `no-new-privileges`.
 - It uses host networking bound to `127.0.0.1:1411`, so it is reachable only through the proxy.
+- If nginx runs in a Docker bridge container, loopback on the host is out of its reach. Bind both listeners to the bridge's gateway instead (`POCKET_ID_HOST`, and the host part of `GROCERY_PUBLIC_HTTP`), set `POCKET_ID_TRUST_PROXY` to the bridge subnet, and point the example's `proxy_pass` lines at that gateway. `docker network inspect <network>` shows both.
 - Its database and uploads live in the `pocket-id-data` volume. Back that volume up together with `.env`: `POCKET_ID_ENCRYPTION_KEY` is needed to read it.
 
 Follow the step-by-step checklist in [`../server/README.md`](../server/README.md#deploying-sign-in), from DNS and certificates to the first connector. Replace `example.com` with your domain everywhere. Keep real domains and addresses out of the committed files.
