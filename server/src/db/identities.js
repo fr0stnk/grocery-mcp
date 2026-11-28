@@ -24,6 +24,11 @@ export function parseMembers(value = '') {
 
 const forbidden = (message) => new StoreError(message, 'FORBIDDEN');
 
+/** Whether this identity has signed in before, so its email need not be looked up again. */
+export function knownIdentity(db, issuer, subject) {
+  return Boolean(db.prepare('SELECT 1 FROM identities WHERE issuer = ? AND subject = ?').get(issuer, subject));
+}
+
 /**
  * The person behind a verified token: { userId, role, email }. A known identity
  * signs in as its person; a new one is linked by email, to the owner when it is
@@ -40,7 +45,7 @@ export function signIn(db, { issuer, subject, email }, { ownerId, ownerEmail = n
   let identity = db.prepare('SELECT user_id FROM identities WHERE issuer = ? AND subject = ?').get(issuer, subject);
   if (!identity) {
     const address = lower(email);
-    if (!address) throw forbidden('the token carries no email, so this account cannot be linked; add an email claim to the access token');
+    if (!address) throw forbidden('no verified email came with this sign-in, so it cannot be linked to a person; sign in again allowing the email scope');
     let userId;
     if (address === ownerAddress) userId = ownerId;
     else if (members.has(address)) {

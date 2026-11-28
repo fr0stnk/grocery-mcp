@@ -7,7 +7,7 @@ import { after, test } from 'node:test';
 import { createGroceryServer } from '../src/app.js';
 import { AuthError, challenge, createTokenVerifier, oauthConfig, protectedResourceMetadata } from '../src/auth.js';
 import { openDatabase } from '../src/db/database.js';
-import { parseMembers, signIn } from '../src/db/identities.js';
+import { knownIdentity, parseMembers, signIn } from '../src/db/identities.js';
 import { ensureEnvironmentStoreAccount, ensureLocalOwner } from '../src/db/people.js';
 import { startHttpServer } from '../src/http.js';
 
@@ -99,7 +99,8 @@ test('oauthConfig needs every value once the public listener is set, and only ht
   });
   assert.deepEqual(protectedResourceMetadata(config).authorization_servers, [ISSUER]);
   assert.equal(challenge(config, { code: 'invalid_token', message: 'the "token" expired' }),
-    'Bearer resource_metadata="https://grocery.example.test/.well-known/oauth-protected-resource/mcp", error="invalid_token", error_description="the token expired"');
+    'Bearer resource_metadata="https://grocery.example.test/.well-known/oauth-protected-resource/mcp", scope="openid email", error="invalid_token", error_description="the token expired"');
+  assert.deepEqual(protectedResourceMetadata(config).scopes_supported, ['openid', 'email']);
 });
 
 test('parseMembers reads email:role pairs and refuses anything else', () => {
@@ -132,7 +133,7 @@ test('signIn links the owner by email, adds members with shared store access, an
 
   const denied = (identity, options, pattern) => assert.throws(() => signIn(db, identity, options), (e) => e.code === 'FORBIDDEN' && pattern.test(e.message));
   denied({ issuer: ISSUER, subject: 'x-1', email: 'stranger@example.test' }, opts, /not allowed/);
-  denied({ issuer: ISSUER, subject: 'x-2' }, opts, /no email/);
+  denied({ issuer: ISSUER, subject: 'x-2' }, opts, /no verified email/);
   denied({ issuer: ISSUER, subject: 'w-1' }, { ...opts, members: parseMembers('guest@example.test:viewer') }, /no longer allowed/);
   db.prepare('UPDATE users SET disabled_at = ? WHERE id = ?').run(new Date(NOW).toISOString(), wife.userId);
   denied({ issuer: ISSUER, subject: 'w-1' }, opts, /disabled/);
@@ -180,7 +181,7 @@ test('the public listener publishes its metadata, challenges without a token and
 
   const anonymous = await call();
   assert.equal(anonymous.status, 401);
-  assert.equal(anonymous.headers.get('www-authenticate'), `Bearer resource_metadata="${config.metadataUrl}"`);
+  assert.equal(anonymous.headers.get('www-authenticate'), `Bearer resource_metadata="${config.metadataUrl}", scope="openid email"`);
   const expired = await call({ authorization: 'Bearer old' });
   assert.equal(expired.status, 401);
   assert.match(expired.headers.get('www-authenticate'), /error="invalid_token", error_description="the token has expired"/);
@@ -195,4 +196,45 @@ test('the public listener publishes its metadata, challenges without a token and
   const names = (await ok.json()).result.tools.map((t) => t.name);
   assert.ok(!names.includes('add_basket_to_cart'), 'a viewer gets the read-only tools');
   assert.deepEqual(seen, [{ userId: 'u1', role: 'viewer' }]);
+});
+
+test('verify.email uses a verified email from the token, otherwise from userinfo for the same subject', async () => {
+  let info = { sub: 'user-1', email: 'owner@example.test', email_verified: true };
+  const sent = [];
+  const fetchJson = async (url, headers) => {
+    if (url.endsWith('/openid-configuration')) return { issuer: ISSUER, jwks_uri: `${ISSUER}/jwks`, userinfo_endpoint: `${ISSUER}/userinfo` };
+    if (url === `${ISSUER}/jwks`) return { keys: [jwk(rsa, 'k1', 'RS256')] };
+    if (url === `${ISSUER}/userinfo`) {
+      sent.push(headers.authorization);
+      if (info instanceof Error) throw info;
+      return info;
+    }
+    throw new Error(url);
+  };
+  const verify = createTokenVerifier({ issuer: ISSUER, audience: AUDIENCE, fetchJson, now: () => NOW });
+  const plain = { ...good, email: undefined };
+  const token = sign(plain, { key: rsa.privateKey });
+  const claims = await verify(token);
+
+  assert.equal(await verify.email(token, { ...claims, email: 'in-token@example.test', email_verified: true }), 'in-token@example.test');
+  assert.equal(sent.length, 0, 'a verified email in the token needs no lookup');
+  assert.equal(await verify.email(token, claims), 'owner@example.test');
+  assert.deepEqual(sent, [`Bearer ${token}`]);
+  assert.equal(await verify.email(token, { ...claims, email: 'unverified@example.test' }), 'owner@example.test', 'an unverified token email is looked up instead');
+  info = { ...info, email_verified: false };
+  assert.equal(await verify.email(token, claims), null, 'an unverified email is never used');
+  info = { sub: 'someone-else', email: 'x@example.test', email_verified: true };
+  assert.equal(await verify.email(token, claims), null, 'userinfo for another subject is ignored');
+  info = new Error('HTTP 401');
+  assert.equal(await verify.email(token, claims), null);
+});
+
+test('knownIdentity says whether a subject has signed in before', async () => {
+  const db = await tempDb();
+  const owner = ensureLocalOwner(db, { GROCERY_OWNER_EMAIL: 'owner@example.test' });
+  assert.equal(knownIdentity(db, ISSUER, 'o-1'), false);
+  signIn(db, { issuer: ISSUER, subject: 'o-1', email: 'owner@example.test' }, { ownerId: owner.id, now: NOW });
+  assert.equal(knownIdentity(db, ISSUER, 'o-1'), true);
+  assert.equal(knownIdentity(db, 'https://other.example.test', 'o-1'), false);
+  db.close();
 });

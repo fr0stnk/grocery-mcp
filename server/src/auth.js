@@ -3,6 +3,8 @@ import crypto from 'node:crypto';
 const JWKS_TTL_MS = 10 * 60_000;
 const JWKS_RETRY_MS = 30_000;
 const CLOCK_SKEW_S = 60;
+// openid and email let the server look up a new person's verified email at userinfo; Pocket ID 2.19 puts no email in access tokens.
+export const SCOPES = ['openid', 'email'];
 
 // Asymmetric algorithms only: "none" and the HMAC family would let anyone who knows a shared secret, or nothing, mint tokens.
 const ALGORITHMS = {
@@ -48,13 +50,14 @@ export function protectedResourceMetadata(config) {
     resource: config.resource,
     authorization_servers: [config.issuer],
     bearer_methods_supported: ['header'],
+    scopes_supported: SCOPES,
     resource_name: 'Grocery',
   };
 }
 
 /** The WWW-Authenticate value for a 401: always names the metadata, and the error when a token was sent. */
 export function challenge(config, error = null) {
-  const parts = [`Bearer resource_metadata="${config.metadataUrl}"`];
+  const parts = [`Bearer resource_metadata="${config.metadataUrl}"`, `scope="${SCOPES.join(' ')}"`];
   if (error) parts.push(`error="${error.code}"`, `error_description="${error.message.replace(/["\\]/g, '')}"`);
   return parts.join(', ');
 }
@@ -75,7 +78,7 @@ const decode = (part) => JSON.parse(Buffer.from(part, 'base64url').toString('utf
 export function createTokenVerifier({ issuer, audience, fetchJson = defaultFetchJson, now = () => Date.now() }) {
   let keys = null;
   let fetchedAt = 0;
-  let jwksUri = null;
+  let meta = null;
 
   async function loadKeys() {
     try {
@@ -85,13 +88,17 @@ export function createTokenVerifier({ issuer, audience, fetchJson = defaultFetch
     }
   }
 
-  async function fetchKeys() {
-    if (!jwksUri) {
-      const meta = await fetchJson(`${issuer}/.well-known/openid-configuration`).catch(() => fetchJson(`${issuer}/.well-known/oauth-authorization-server`));
-      if (meta?.issuer?.replace(/\/+$/, '') !== issuer || !meta.jwks_uri) throw new AuthError('the issuer\'s discovery document does not match it', 'server_error');
-      jwksUri = meta.jwks_uri;
+  async function discovery() {
+    if (!meta) {
+      const found = await fetchJson(`${issuer}/.well-known/openid-configuration`).catch(() => fetchJson(`${issuer}/.well-known/oauth-authorization-server`));
+      if (found?.issuer?.replace(/\/+$/, '') !== issuer || !found.jwks_uri) throw new AuthError('the issuer\'s discovery document does not match it', 'server_error');
+      meta = found;
     }
-    const jwks = await fetchJson(jwksUri);
+    return meta;
+  }
+
+  async function fetchKeys() {
+    const jwks = await fetchJson((await discovery()).jwks_uri);
     keys = Array.isArray(jwks?.keys) ? jwks.keys : [];
     fetchedAt = now();
   }
@@ -109,7 +116,7 @@ export function createTokenVerifier({ issuer, audience, fetchJson = defaultFetch
     return crypto.createPublicKey({ key: jwk, format: 'jwk' });
   }
 
-  return async function verify(token) {
+  async function verify(token) {
     const parts = String(token ?? '').split('.');
     if (parts.length !== 3) throw new AuthError('the access token is not a JWT');
     let header;
@@ -142,11 +149,38 @@ export function createTokenVerifier({ issuer, audience, fetchJson = defaultFetch
     if (Number.isFinite(claims.nbf) && claims.nbf - CLOCK_SKEW_S > t) throw new AuthError('the token is not valid yet');
     if (!claims.sub) throw new AuthError('the token names no subject');
     return claims;
+  }
+
+  /**
+   * The verified email of the person a valid token belongs to: from the token
+   * when it carries one, otherwise from the issuer's userinfo endpoint, which
+   * must name the same subject. An email the issuer has not verified is never
+   * used, since it is what links a first sign-in to a person.
+   */
+  verify.email = async function email(token, claims) {
+    if (claims.email && claims.email_verified === true) return claims.email;
+    let endpoint;
+    try {
+      endpoint = (await discovery()).userinfo_endpoint;
+    } catch (error) {
+      throw error instanceof AuthError ? error : new AuthError(`the issuer cannot be reached: ${error.message}`, 'server_error');
+    }
+    if (!endpoint) return null;
+    let info;
+    try {
+      info = await fetchJson(endpoint, { authorization: `Bearer ${token}` });
+    } catch {
+      return null;
+    }
+    if (info?.sub !== claims.sub) return null;
+    return info.email && info.email_verified === true ? info.email : null;
   };
+
+  return verify;
 }
 
-async function defaultFetchJson(url) {
-  const response = await fetch(url, { headers: { Accept: 'application/json' }, redirect: 'error', signal: AbortSignal.timeout(10_000) });
+async function defaultFetchJson(url, headers = {}) {
+  const response = await fetch(url, { headers: { Accept: 'application/json', ...headers }, redirect: 'error', signal: AbortSignal.timeout(10_000) });
   if (!response.ok) throw new AuthError(`${new URL(url).host} answered HTTP ${response.status}`, 'server_error');
   return response.json();
 }

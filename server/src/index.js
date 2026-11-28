@@ -11,7 +11,7 @@ import { createDelivery } from './delivery.js';
 import { PreferenceStore } from './preferences.js';
 import { bootstrap } from './db/bootstrap.js';
 import { databaseFile, openDatabase } from './db/database.js';
-import { parseMembers, signIn } from './db/identities.js';
+import { knownIdentity, parseMembers, signIn } from './db/identities.js';
 import { recordAudit } from './db/people.js';
 import { DbPreferenceStore } from './db/preferences.js';
 import { createVault } from './db/vault.js';
@@ -184,7 +184,8 @@ if (httpListen) {
         config: oauth,
         authenticate: async (token) => {
           const claims = await verify(token);
-          return signIn(db, { issuer: oauth.issuer, subject: claims.sub, email: claims.email }, { ownerId, ownerEmail: process.env.GROCERY_OWNER_EMAIL, members });
+          const email = knownIdentity(db, oauth.issuer, claims.sub) ? null : await verify.email(token, claims);
+          return signIn(db, { issuer: oauth.issuer, subject: claims.sub, email }, { ownerId, ownerEmail: process.env.GROCERY_OWNER_EMAIL, members });
         },
       },
       makeServer: (who) => createGroceryServer(stores, {

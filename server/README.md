@@ -319,12 +319,12 @@ With `GROCERY_PUBLIC_HTTP` set (HTTP mode only), the server opens a second liste
 The server is an OAuth resource server (`src/auth.js`), not a login service:
 
 - `/.well-known/oauth-protected-resource` and `/.well-known/oauth-protected-resource/mcp` (RFC 9728) name the authorization server, `GROCERY_OAUTH_ISSUER`.
-- A request without a token gets `401` with `WWW-Authenticate: Bearer resource_metadata="…"`, which starts the client's sign-in. A bad token gets `401` with `error="invalid_token"`.
+- A request without a token gets `401` with `WWW-Authenticate: Bearer resource_metadata="…", scope="openid email"`, which starts the client's sign-in. The metadata lists the same scopes. A bad token gets `401` with `error="invalid_token"`.
 - Tokens are JWTs. Each is checked against the issuer's keys, found through its discovery document and cached for 10 minutes, with an unknown key id refetching them. The checks cover the signature (asymmetric algorithms only), `iss`, `aud` (the public URL's `/mcp`, or `GROCERY_OAUTH_AUDIENCE`), `exp` and `nbf`. Clients ask for that audience with the RFC 8707 `resource` parameter.
-- The token's subject is a sign-in identity (`identities`, migration 2) linked to a person. On first sign-in the token's `email` claim links it: the owner's address (`GROCERY_OWNER_EMAIL`) links to the owner, and an address in `GROCERY_OAUTH_USERS` creates that person and gives them the owner's store accounts in their role. Anyone else gets `403`, and so does a person later removed from the list or disabled.
+- The token's subject is a sign-in identity (`identities`, migration 2) linked to a person. On first sign-in a verified email links it: the token's `email` claim when `email_verified` is true, otherwise the issuer's userinfo endpoint, called once with the token and only trusted for the same subject: the owner's address (`GROCERY_OWNER_EMAIL`) links to the owner, and an address in `GROCERY_OAUTH_USERS` creates that person and gives them the owner's store accounts in their role. Anyone else gets `403`, and so does a person later removed from the list or disabled.
 - Each person gets their own preferences and audit trail. A `viewer` gets the read-only tools; the owner and a `shopper` get all of them, on the shared store accounts.
 
-The provider must put `email` in access tokens and support RFC 8707 resources and a way for clients to register. Pocket ID does this with Client ID Metadata Documents (CIMD), which ChatGPT and Claude use. Its CIMD allowlist must include the clients' metadata URLs, and the Grocery API must be granted to CIMD clients.
+The provider must issue JWT access tokens, support RFC 8707 resources, answer userinfo for tokens with the `openid` and `email` scopes, and offer a way for clients to register. Pocket ID does this with Client ID Metadata Documents (CIMD), which ChatGPT and Claude use. Its CIMD allowlist must include the clients' metadata URLs, and the Grocery API must be granted to CIMD clients.
 
 ## HTTP mode
 
