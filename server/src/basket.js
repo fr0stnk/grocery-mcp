@@ -1,4 +1,4 @@
-import { bestCandidates, matchedTerms, queryTerms, withoutPackaging } from './match.js';
+import { bestCandidates, cleanQuery, matchedTerms, queryTerms, withoutPackaging } from './match.js';
 import { parseCount, parseSize, shufersalBarcode, StoreError } from './normalize.js';
 import { relevantOnly, relevantSearch, searchCache, searchStore, selectStores, singularQueries, storeStatus } from './search.js';
 
@@ -119,11 +119,16 @@ const STATED = {
     const values = [...String(product.name ?? '').matchAll(new RegExp(PERCENT, 'gu'))].map((m) => Number(m[1].replace(',', '.')));
     return values.length ? values : null;
   },
+  count: (product) => {
+    const n = product.count ?? parseCount(product.name);
+    return n == null ? null : [n];
+  },
 };
 // Attributes judged per store: when any candidate states one, a product that
 // states nothing is not taken on trust. "חלב 99%" is impossible where milks say
-// 1%, 2% or 3%, while "חלב 3%" keeps unlabelled milks where none say.
-const STRICT_WHEN_STATED = ['percent'];
+// 1%, 2% or 3%, while "חלב 3%" keeps unlabelled milks where none say. Where
+// eggs state 12 or 30, egg salad and egg noodles state no count and are out.
+const STRICT_WHEN_STATED = ['percent', 'count'];
 
 /** The constraints a store's candidates make checkable: those of STRICT_WHEN_STATED that at least one of them states. */
 export function statedIn(list, constraints) {
@@ -146,6 +151,7 @@ export function fitOf(product, constraints, { strict = [] } = {}) {
   }
   if (constraints.count) {
     const n = product.count ?? parseCount(product.name);
+    if (n == null && strict.includes('count')) return `no count stated, not ${constraints.count} units`;
     if (n == null) unknown = true;
     else if (n !== constraints.count) return `${n} units, not ${constraints.count}`;
   }
@@ -181,6 +187,7 @@ function fitting(list, constraints) {
   const unknown = scored.filter(([, f]) => f === 'unknown').map(([x]) => ({ ...x, fit: 'unverified' }));
   return { list: [...ok, ...unknown], rejected: scored.length - ok.length - unknown.length };
 }
+
 
 /**
  * Chooses one product per store for an item. A pinned barcode must match
@@ -233,6 +240,9 @@ export function lineCost(match, quantity) {
 }
 
 const FRACTIONAL = 'INCOMPATIBLE_QUANTITY_BASIS';
+// The catalogs are Hebrew, so a Latin "milk" finds a ₪2,499 "MAGENTA MILK" rather than milk.
+const UNTRANSLATED = 'UNTRANSLATED_QUERY';
+const untranslated = (it) => !it.barcode && !/[\u0590-\u05FF]/u.test(it.query) && !/^\d+$/.test(it.query);
 
 /**
  * Drops candidates priced more than PRICE_RATIO times the median of a store's
@@ -258,7 +268,7 @@ function withoutOutliers(list) {
 function unitPriceComparisonOf(selected, offers, quantity, reason) {
   if (selected.length !== 2) return null;
   const priced = selected.map((st) => offers[st.id]);
-  if (!priced.every(isPriced) || priced.some((o) => o.unrequested)) return null;
+  if (!priced.every(isPriced) || priced.some((o) => o.unrequested || o.lacks)) return null;
   const basis = priced[0].priceBasis;
   if (sizeDifference(priced, quantity) !== reason || basis !== priced[1].priceBasis || !['unit', 'kg'].includes(basis)) return null;
   const perUnit = priced[0].perUnit;
@@ -302,6 +312,7 @@ function offer(match, quantity) {
     ...(match.pricePerUnit > 0 && match.perUnit ? { pricePerUnit: match.pricePerUnit, perUnit: match.perUnit } : {}),
     ...(match.fit ? { fit: match.fit } : {}),
     ...(match.unrequested ? { unrequested: match.unrequested } : {}),
+    ...(match.lacks ? { lacks: match.lacks } : {}),
     ...(packs ? { packs, packWeightKg: match.packWeightKg, packPrice: match.packPrice, lineTotal: round(packs * match.packPrice) } : lineCost(match, quantity)),
     ...(clubOffer ? { clubOffer } : {}),
     ...(match.soldByWeight ? { soldByWeight: true } : {}),
@@ -323,6 +334,8 @@ const UNIT_PRICE_RATIO = 5;
 function equivalenceOf(offers, quantity = 1) {
   const variant = offers.find((o) => o.unrequested);
   if (variant) return `${variant.name} is a variant that was not asked for (${variant.unrequested.join(', ')})`;
+  const otherForm = offers.find((o) => o.lacks);
+  if (otherForm) return `${otherForm.name} is not in the requested form (${otherForm.lacks.join(', ')})`;
   if (offers.length < 2) return 'match';
   // Matching names at prices this far apart are different kinds of product (a ₪295 window-cleaning robot vs a ₪25 spray).
   // Where both have a price per kg, litre or piece, that is what is compared: a 3.1 kg potato pack at 5.9/kg is not an outlier.
@@ -344,7 +357,7 @@ function sizeDifference(offers, quantity = 1) {
   if (basis(a) !== basis(b)) return `${basis(a)} vs ${basis(b)}`;
   if (basis(a) === 'kg') {
     const [ka, kb] = [boughtKg(a, quantity), boughtKg(b, quantity)];
-    return Math.abs(ka - kb) <= Math.max(ka, kb) * 0.2 ? 'match' : `${ka} kg vs ${kb} kg`;
+    return close(ka, kb) ? 'match' : `${ka} kg vs ${kb} kg`;
   }
   if (basis(a) !== 'unit') return 'match';
   if (a.count && b.count && a.count !== b.count) return `${a.count} vs ${b.count} units`;
@@ -453,7 +466,7 @@ export function resolveItems(args, preferences) {
       quantity ??= saved.quantity;
     }
     barcode = typeof barcode === 'string' && barcode.trim() ? barcode.trim() : undefined;
-    const typed = typeof query === 'string' ? query.trim() : '';
+    const typed = typeof query === 'string' ? cleanQuery(query) : '';
     // The search runs by barcode, but the item is reported by the words the user knows it by.
     const label = barcode ? typed || preference || undefined : undefined;
     query = barcode ?? typed;
@@ -639,6 +652,7 @@ export async function compareBasket(stores, args = {}, { timeoutMs = 45_000, cac
       const m = matches[s.id];
       let o = offer(m, it.packs && m && (m.priceBasis ?? 'unit') !== 'kg' ? it.packs : it.quantity);
       if (o && byName.has(s.id)) o = { ...o, matchedBy: 'name' };
+      if (isPriced(o) && untranslated(it) && !it.pin?.[s.id]) o = { excluded: UNTRANSLATED, productId: o.productId, name: o.name, price: o.price, priceBasis: o.priceBasis };
       return [s.id, o];
     }));
     // Identity is claimed only for offers that can actually be priced.
@@ -735,16 +749,17 @@ export async function compareBasket(stores, args = {}, { timeoutMs = 45_000, cac
   if (lines.some((l) => Object.values(l.offers).some((o) => o?.soldByWeight))) notes.push('For weighed items the quantity is kilograms and the price is per kilogram where the store says so.');
   if (lines.some((l) => !l.identical && Object.values(l.offers).filter(isPriced).length > 1)) notes.push('Items with identical: false compare different products; check that they are acceptable substitutes.');
   if (lines.some((l) => l.notEquivalent)) notes.push('Items whose products differ in size, count or how they are sold (notEquivalent) are in each store\'s total but have no cheapestStore and are left out of comparable and of the split total (split.leftOut); ask which product the user wants.');
-  if (lines.some((l) => Object.values(l.offers).some((o) => o?.excluded))) notes.push('A fractional quantity is kilograms; products sold by unit or package cannot be priced for it and are listed in notComparable. Ask for whole units, or choose a product sold by weight.');
+  if (lines.some((l) => Object.values(l.offers).some((o) => o?.excluded === FRACTIONAL))) notes.push('A fractional quantity is kilograms; products sold by unit or package cannot be priced for it and are listed in notComparable. Ask for whole units, or choose a product sold by weight.');
   for (const l of lines.filter((x) => x.identical && x.unrequested)) {
     notes.push(`"${l.query}": every store offers only ${l.offers[selected[0].id].name} (${l.unrequested.join(', ')}), the same product, priced as sold; tell the user before ordering.`);
   }
   if (lines.some((l) => Object.values(l.offers).some((o) => o?.packs))) notes.push('Offers with packs are packaged produce priced per kg: the quantity in kg is rounded to whole packs of about packWeightKg (half rounds up, at least one), and lineTotal is packs × packPrice. The final charge follows the actual weight. To order, pass packs as the quantity to add_basket_to_cart.');
   if (lines.some((l) => Object.values(l.offers).some((o) => o?.unrequested))) notes.push('Offers with unrequested are the closest product a store has, but carry a variant or pack the query did not ask for (Diet, flavoured, frozen, a six-pack); confirm them with the user.');
+  if (lines.some((l) => Object.values(l.offers).some((o) => o?.lacks))) notes.push('Offers with lacks are the closest product a store has, but not in the form the query names (a spray, a gel, tablets); confirm them with the user.');
   if (lines.some((l) => Object.values(l.offers).some((o) => o?.fit === 'unverified'))) notes.push('Offers with fit: unverified could not be checked against the size, count or grade in the query; confirm them.');
   if (lines.some((l) => l.constraints && Object.values(l.offers).some((o) => !o))) notes.push('A store with no product matching the size, count or grade in the query lists the item as missing rather than offering a different one.');
-  const untranslated = lines.filter((l) => !l.barcode && !/[\u0590-\u05FF]/u.test(l.query) && !/^\d+$/.test(l.query)).map((l) => l.query);
-  if (untranslated.length) notes.push(`The store catalogs are in Hebrew and these items have no Hebrew letters: ${untranslated.join(', ')}. Translate them to Hebrew (for example milk → חלב) and compare again.`);
+  const foreign = lines.filter((l) => untranslated(l)).map((l) => l.query);
+  if (foreign.length) notes.push(`The store catalogs are in Hebrew and these items have no Hebrew letters: ${foreign.join(', ')}. Their offers are marked ${UNTRANSLATED} and left out of every total. Translate them to Hebrew (for example milk → חלב) and compare again.`);
   for (const [id, st] of Object.entries(status)) if (st.stale) notes.push(`${id} did not answer; its prices are cached from ${st.fetchedAt}.`);
 
   if (fromOrder) notes.push(`Prices are today's, not what order ${fromOrder.info.order} cost; its paid total includes delivery and any weighing differences.`);

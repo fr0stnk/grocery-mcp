@@ -72,3 +72,16 @@ test('sortBy unitPrice keeps kg, litre and piece prices in separate groups (revi
   assert.deepEqual(out.results.map((r) => `${r.pricePerUnit}/${r.perUnit}`), ['8.9/kg', '11.9/kg', '9.9/L', 'null/null']);
 });
 
+test('emoji and exclamation marks are dropped from a query (GROC-043)', async () => {
+  const { cleanQuery } = await import('../src/match.js');
+  assert.equal(cleanQuery('🥛 חלב!!!'), 'חלב');
+  assert.equal(cleanQuery('חלב 3% 1 ליטר'), 'חלב 3% 1 ליטר');
+  assert.equal(cleanQuery("קוטג' 5%"), "קוטג' 5%");
+  const seen = [];
+  const one = [{ id: 'shufersal', label: 'shufersal', search: { maxLimit: 20, run: async ({ query }) => { seen.push(query); return [item('shufersal', 'חלב 3%', 7, 7)]; } } }];
+  const out = await searchAllStores(one, { query: '🥛 חלב!!!' }, { cache: new SearchCache() });
+  assert.deepEqual([seen[0], out.results.length], ['חלב', 1]);
+  const { relevantOnly } = await import('../src/search.js');
+  assert.equal(relevantOnly([{ name: 'חלב 3%' }], 'חלב!!!').kept.length, 1, 'punctuation glued to a word does not hide matches');
+});
+

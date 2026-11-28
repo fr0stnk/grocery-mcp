@@ -1,7 +1,7 @@
 import { createLimiter, SearchCache } from './cache.js';
 import { compareItems, StoreError } from './normalize.js';
 import { withTimeout } from './stores.js';
-import { isAbout, matchedTerms, queryTerms, stemOf, strongTerms, withoutPackaging } from './match.js';
+import { cleanQuery, isAbout, matchedTerms, queryTerms, stemOf, strongTerms, withoutPackaging } from './match.js';
 
 /** Shared by every request in this process; see cache.js for the freshness rules. */
 export const searchCache = new SearchCache();
@@ -99,7 +99,7 @@ export function selectStores(stores, wantedIds) {
 }
 
 export async function searchAllStores(stores, args = {}, { timeoutMs = 45_000, cache = searchCache } = {}) {
-  const query = typeof args.query === 'string' ? args.query.trim() : '';
+  const query = typeof args.query === 'string' ? cleanQuery(args.query) : '';
   if (!query) throw new StoreError('query is required', 'INVALID_ARGUMENT');
   const limit = Number.isInteger(args.limit) ? Math.min(Math.max(args.limit, 1), 20) : 10;
   const selected = selectStores(stores, args.stores);

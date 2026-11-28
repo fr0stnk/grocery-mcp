@@ -138,7 +138,9 @@ test('GROC-009: Shufersal packaged produce is priced per kg and bought in whole 
   const [twoHalf] = out.items;
   assert.deepEqual([packsFor(2.5, 1), twoHalf.offers.shufersal.packs, twoHalf.offers.shufersal.lineTotal], [3, 3, 26.7], '2.5 packs round half up to 3');
   assert.equal(twoHalf.offers['rami-levy'].lineTotal, 22.25);
-  assert.equal(out.comparable.items, 1);
+  // GROC-041: 3 kg against 2.5 kg at the same ₪8.9/kg is not a cheaper store, only more tomatoes.
+  assert.deepEqual([out.comparable.items, twoHalf.notEquivalent, twoHalf.cheapestStore], [0, '3 kg vs 2.5 kg', null]);
+  assert.deepEqual([twoHalf.unitPriceComparison.amount, twoHalf.unitPriceComparison.cheaperStore], [2.5, null]);
   assert.deepEqual([packsFor(0.2, 1), packsFor(1.4, 1)], [1, 1]);
 });
 
@@ -182,8 +184,36 @@ test('GROC-015: packaging words are not product words, and a store is retried wi
 
 test('GROC-016: compare_basket says to translate a query with no Hebrew letters', async () => {
   const out = await compare([{ query: 'lactose free milk', quantity: 1 }, { query: 'חלב 3% 1 ליטר', quantity: 1 }]);
-  assert.ok(out.notes.some((n) => /no Hebrew letters: lactose free milk\. Translate/.test(n)));
+  assert.ok(out.notes.some((n) => /no Hebrew letters: lactose free milk\. .*Translate/.test(n)));
   assert.ok(!(await compare([{ query: 'חלב 3% 1 ליטר', quantity: 1 }])).notes.some((n) => /Translate/.test(n)));
+});
+
+test('GROC-042: an untranslated query is not priced into any total', async () => {
+  const store = (id, items) => ({ id, label: id, search: { maxLimit: 20, run: async () => items } });
+  const magenta = { store: 'shufersal', productId: 'P_1', barcode: null, name: 'MAGENTA MILK', price: 2499, priceBasis: 'unit' };
+  const out = await compareBasket([store('shufersal', [magenta]), store('rami-levy', [])], { items: [{ query: 'milk', quantity: 1 }] }, { cache: new SearchCache() });
+  assert.equal(out.items[0].offers.shufersal.excluded, 'UNTRANSLATED_QUERY');
+  assert.deepEqual([out.totals.shufersal.total, out.totals.shufersal.notComparable], [0, ['milk']]);
+  assert.ok(!out.notes.some((n) => /fractional/i.test(n)));
+});
+
+test('GROC-040: a stated count keeps out products that state none (egg salad, egg noodles)', async () => {
+  const store = (id, items) => ({ id, label: id, search: { maxLimit: 20, run: async () => items.map((x, i) => ({ store: id, productId: `${id}${i}`, barcode: null, priceBasis: 'unit', ...x })) } });
+  const shufersal = [{ name: 'ביצים ארוזות L 18', count: 18, price: 21.81 }, { name: 'ביצי משק טריות L 12', count: 12, price: 14.54 }, { name: 'סלט ביצים', size: '0.25 kg', price: 22.9 }, { name: 'תבנית ביצים למקרר', price: 21.9 }];
+  const rami = [{ name: 'ביצים 30יח בינוני M', count: 30, price: 33.4 }, { name: 'ביצים 12 יח גדול L', count: 12, price: 14.5 }, { name: "אטריות ביצים 300 ג'", size: '0.3 kg', price: 7.8 },
+    { name: 'סלט ביצים 200גר', size: '0.2 kg', price: 19.2 }, { name: 'פתיתי ביצים', price: 9.9 }, { name: 'אטריות ביצים דקות 400 גר', size: '0.4 kg', price: 7.4 }];
+  const out = await compareBasket([store('shufersal', shufersal), store('rami-levy', rami)], { items: [{ query: 'ביצים 30' }, { query: 'ביצים L 30 יחידות' }] }, { cache: new SearchCache() });
+  const [thirty, large] = out.items;
+  assert.deepEqual([thirty.offers.shufersal, thirty.offers['rami-levy']?.name], [null, 'ביצים 30יח בינוני M'], 'the 30-pack, not a cheaper noodle pack taking it for an outlier');
+  assert.deepEqual([large.offers.shufersal, large.offers['rami-levy']], [null, null], 'no 30 L eggs: missing, not egg salad');
+});
+
+test('GROC-044: a product in another form than the query names is flagged, and loses to one in that form', () => {
+  const [bleach] = bestCandidates([{ name: "אקונומיקה בריח לימון סנו ז'אוול 1 ליטר" }], "סנו ג'אוול מרסס לימון");
+  assert.deepEqual(bleach.lacks, ['מרסס']);
+  const picked = bestCandidates([{ name: 'סבון אסלה לימון' }, { name: 'ג׳ל ניקוי אסלה לימון' }, { name: 'גל ניקוי אסלה לימון ליים' }], 'גל ניקוי אסלה לימון ליים');
+  assert.deepEqual(picked.map((x) => [x.name, x.lacks]), [['גל ניקוי אסלה לימון ליים', undefined]]);
+  assert.equal(bestCandidates([{ name: 'תרסיס לניקוי חלונות' }], 'ספריי לניקוי חלונות')[0].lacks, undefined, 'another spelling of the same form');
 });
 
 test('GROC-008: a flavoured bread loses to plain bread, and is flagged when it is all a store has', () => {

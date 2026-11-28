@@ -43,6 +43,17 @@ const VARIANT_WORDS = new Set([
   // Added flavours, which turn a plain product into a variant: "לחם מחמצת עגבניות" is tomato bread.
   'עגבניות', 'זיתים', 'שום', 'בצל', 'צימוקים', 'אגוזים', 'תמרים', 'קינמון', 'זעתר', 'פטריות',
 ]);
+// The form a product comes in. A query naming one ("סנו ג'אוול מרסס") is not met by another form (plain bleach,
+// a toilet block for "גל ניקוי אסלה"); each group holds the spellings of one form.
+const FORM_GROUPS = [
+  ['מרסס', 'ספריי', 'ספרי', 'תרסיס'],
+  ['גל', 'ג׳ל'],
+  ['טבליות', 'טבלית', 'טבלייה', 'טבליה'],
+  ['קפסולות', 'קפסולה'],
+  ['אבקה', 'אבקת'],
+];
+const formGroupOf = (w) => FORM_GROUPS.find((g) => g.includes(w) || g.includes(bareOf(w)));
+
 const MULTIPACK_WORDS = new Set(['שישייה', 'שישיה', 'שישיית', 'רביעייה', 'רביעיה', 'מארז', 'זוג', 'פחיות']);
 const MULTIPACK_RE = /\d+\s*[*xX×]\s*\d/u;
 // The word itself or, failing that, the word behind a one-letter prefix: "לימון" is not "ל" + "ימון".
@@ -50,11 +61,16 @@ const inSet = (set, w) => set.has(w) || set.has(bareOf(w));
 
 const expand = (text) => EXPANSIONS.reduce((t, [re, to]) => t.replace(re, to), ` ${String(text ?? '')} `);
 
+/** A typed query without emoji and exclamation or question marks, which no product name has: "🥛 חלב!!!" → "חלב". */
+export function cleanQuery(text) {
+  return String(text ?? '').replace(/(?:\p{Extended_Pictographic}|\p{Emoji_Modifier}|\u{FE0F}|\u{200D}|[!?¡¿…])+/gu, ' ').replace(/\s+/g, ' ').trim();
+}
+
 /** Lower-cased words of a text, with store abbreviations expanded and punctuation removed. */
 export function wordsOf(text) {
   return expand(text)
     .toLocaleLowerCase()
-    .replace(/["'״׳()\-,.+]/g, ' ')
+    .replace(/[^\p{L}\p{M}\p{N}%]+/gu, ' ')
     // Stores glue sizes to words ("קוביות485", "1ליטר").
     .replace(/([\u0590-\u05FF])(?=\d)|(\d)(?=[\u0590-\u05FF])/gu, '$1$2 ')
     .split(/\s+/).filter((w) => w.length >= 2 || /\d/.test(w));
@@ -153,7 +169,9 @@ export function scoreOf(item, terms, query) {
       : words.find((w) => inSet(MULTIPACK_WORDS, w)) ?? (MULTIPACK_RE.test(item.name ?? '') ? 'multipack' : null);
     if (pack) unrequested.push(pack);
   }
-  return { matched: matchedTerms(item, terms), head, penalty: unrequested.length, unrequested: [...new Set(unrequested)] };
+  const forms = [...new Set(queryWords.map(formGroupOf).filter(Boolean))];
+  const lacks = forms.filter((g) => !words.some((w) => formGroupOf(w) === g)).map((g) => queryWords.find((w) => formGroupOf(w) === g));
+  return { matched: matchedTerms(item, terms), head, penalty: unrequested.length + lacks.length, unrequested: [...new Set(unrequested)], lacks };
 }
 
 /**
@@ -163,7 +181,8 @@ export function scoreOf(item, terms, query) {
  * only those matching the most query words, then those with the fewest
  * unrequested variants, then those naming the product first are kept. When even
  * those carry an unrequested variant (only Diet Coke is sold), each is marked
- * with `unrequested` so it is not passed off as what was asked for.
+ * with `unrequested` so it is not passed off as what was asked for, and one
+ * missing the form the query names (a spray, a gel) with `lacks`.
  */
 export function bestCandidates(list, query) {
   const terms = queryTerms(query);
@@ -174,5 +193,9 @@ export function bestCandidates(list, query) {
   if (!scored.length) return [];
   const better = (a, b) => b.matched - a.matched || a.penalty - b.penalty || Number(b.head) - Number(a.head);
   const best = scored.reduce((top, [, s]) => (better(s, top) < 0 ? s : top), scored[0][1]);
-  return scored.filter(([, s]) => better(s, best) === 0).map(([item, s]) => (s.unrequested.length ? { ...item, unrequested: s.unrequested } : item));
+  return scored.filter(([, s]) => better(s, best) === 0).map(([item, s]) => ({
+    ...item,
+    ...(s.unrequested.length ? { unrequested: s.unrequested } : {}),
+    ...(s.lacks.length ? { lacks: s.lacks } : {}),
+  }));
 }
