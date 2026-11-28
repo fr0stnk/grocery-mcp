@@ -11,6 +11,7 @@ import { createDelivery } from './delivery.js';
 import { PreferenceStore } from './preferences.js';
 import { bootstrap } from './db/bootstrap.js';
 import { databaseFile, openDatabase } from './db/database.js';
+import { createCartJournal } from './db/cart-syncs.js';
 import { knownIdentity, parseMembers, signIn } from './db/identities.js';
 import { recordAudit } from './db/people.js';
 import { DbPreferenceStore } from './db/preferences.js';
@@ -58,11 +59,14 @@ let history = historyOff ? null : new PriceHistory();
 let audit = () => {};
 let auditFor = () => audit;
 let people = null;
+let cartJournal = null;
 try {
   const file = databaseFile();
   const db = await openDatabase(file);
   const { owner, accounts } = bootstrap(db, { storeIds: stores.map((s) => s.id), dataDir: path.dirname(file), log });
   const accountOf = new Map(accounts.map((a) => [a.store, a.id]));
+  for (const store of stores) store.storeAccountId = accountOf.get(store.id);
+  cartJournal = createCartJournal(db, file);
   preferences = new DbPreferenceStore(db, owner.id);
   history = historyOff ? null : new PriceHistory(undefined, { db });
   auditFor = (userId) => ({ tool, store, outcome, durationMs, details }) =>
@@ -172,7 +176,9 @@ process.on('SIGINT', () => void shutdown(130));
 process.on('SIGTERM', () => void shutdown(143));
 
 if (httpListen) {
-  await startHttpServer({ ...httpListen, makeServer: () => createGroceryServer(stores, { readOnly, log, preferences, monitor, history, audit, delivery }), log });
+  await startHttpServer({ ...httpListen, makeServer: () => createGroceryServer(stores, {
+    readOnly, log, preferences, monitor, history, audit, delivery, cartJournal, userId: people?.ownerId,
+  }), log });
   if (oauth && !people) log('sign-in is configured but the database is unavailable, so the public listener is not started');
   else if (oauth) {
     const verify = createTokenVerifier({ issuer: oauth.issuer, audience: oauth.audience });
@@ -196,6 +202,8 @@ if (httpListen) {
         history,
         audit: auditFor(who.userId),
         delivery,
+        cartJournal,
+        userId: who.userId,
       }),
       log: (m) => log(`public: ${m}`),
     });
@@ -203,7 +211,7 @@ if (httpListen) {
   // Only the long-running server tracks prices; one-shot stdio runs just record what they search.
   if (history) startTracker({ preferences, stores, search: (store, q) => searchStore(store, q), log });
 } else {
-  const server = createGroceryServer(stores, { readOnly, log, preferences, monitor, history, audit, delivery });
+  const server = createGroceryServer(stores, { readOnly, log, preferences, monitor, history, audit, delivery, cartJournal, userId: people?.ownerId });
   server.onclose = () => void shutdown(0);
   // The SDK's stdio transport does not close on end of input, and the child
   // adapters' pipes would keep this process alive after the client leaves.

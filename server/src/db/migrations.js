@@ -144,4 +144,15 @@ export const MIGRATIONS = [
       CREATE INDEX identities_user ON identities (user_id);
     `,
   },
+  {
+    version: 3,
+    name: 'cart synchronization outcomes',
+    sql: `
+      ALTER TABLE cart_syncs ADD COLUMN operation TEXT;
+      ALTER TABLE cart_syncs ADD COLUMN finished_at TEXT;
+      ALTER TABLE cart_syncs ADD COLUMN status TEXT NOT NULL DEFAULT 'legacy'
+        CHECK (status IN ('legacy', 'in_progress', 'completed', 'partial', 'no_write', 'unknown'));
+      CREATE UNIQUE INDEX cart_syncs_active_account ON cart_syncs (store_account_id) WHERE status = 'in_progress';
+    `,
+  },
 ];

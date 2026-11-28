@@ -1,6 +1,7 @@
 import { StoreError } from './normalize.js';
 import { packsFor } from './basket.js';
 import { searchCache, searchStore } from './search.js';
+import { KEY_SCHEMA, requestKey } from './cart-args.js';
 
 const MAX_ITEMS = 60;
 const SHUFERSAL_MAX_QUANTITY = 30;
@@ -16,7 +17,8 @@ export const ADD_BASKET_TOOL = {
     'and Rami Levy names and prices come from the server\'s own search results rather than the request ' +
     '(a Rami Levy product outside recent results is looked up by its name, and refused as PRODUCT_NOT_VERIFIED if not found). ' +
     'Each item gets a status (added, would-add or rejected); complete is false when anything was rejected. Quantities are added to what is ' +
-    'already in the cart. Use dry_run: true to preview. Nothing is ordered or paid. Show the user the list and store before calling.',
+    'already in the cart. Use dry_run: true to preview. For a Rami Levy addition use the same idempotency_key on retries and a new key for an intentional new addition. ' +
+    'Nothing is ordered or paid. Show the user the list and store before calling.',
   annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   inputSchema: {
     type: 'object',
@@ -39,6 +41,7 @@ export const ADD_BASKET_TOOL = {
         },
       },
       dry_run: { type: 'boolean', default: false, description: 'Check and report only; the cart is not changed' },
+      idempotency_key: KEY_SCHEMA,
     },
     required: ['store', 'items'],
     additionalProperties: false,
@@ -54,8 +57,9 @@ function parseText(result) {
   }
 }
 
-function parseRequest(args) {
+export function parseCartRequest(args) {
   if (!['shufersal', 'rami-levy'].includes(args.store)) throw new StoreError('store must be shufersal or rami-levy', 'INVALID_ARGUMENT');
+  requestKey(args, args.store === 'rami-levy');
   if (!Array.isArray(args.items) || !args.items.length) throw new StoreError('items must be a non-empty list', 'INVALID_ARGUMENT');
   if (args.items.length > MAX_ITEMS) throw new StoreError(`at most ${MAX_ITEMS} items at once`, 'INVALID_ARGUMENT');
   return args.items.map((it, i) => {
@@ -135,7 +139,7 @@ async function checkRamiLevy(store, it, cache, history) {
   if (product === undefined) return reject(it, 'STORE_UNAVAILABLE', 'Rami Levy could not be searched to check this product');
   if (!product) {
     return reject(it, 'PRODUCT_NOT_VERIFIED', it.name
-      ? `${it.productId} was not found when searching Rami Levy for "${it.name}"; search for the product and use a productId from the results`
+      ? `${it.productId} was not found when searching Rami Levy by name; search for the product and use a productId from the results`
       : `${it.productId} has not been seen in searches through this server in the last two days; search for it first, or pass its name so it can be looked up`);
   }
   if (product.inStock === false) return reject(it, 'OUT_OF_STOCK', `${product.name} is not sold at this branch`);
@@ -177,8 +181,8 @@ function summary(store, dryRun, results) {
   };
 }
 
-export async function addBasketToCart(stores, args = {}, { cache = searchCache, history = null } = {}) {
-  const items = parseRequest(args);
+export async function addBasketToCart(stores, args = {}, { cache = searchCache, history = null, callRamiCart } = {}) {
+  const items = parseCartRequest(args);
   const store = stores.find((s) => s.id === args.store);
   if (!store) throw new StoreError(`${args.store} is not configured on this server`, 'STORE_UNAVAILABLE');
   const dryRun = Boolean(args.dry_run);
@@ -222,7 +226,8 @@ export async function addBasketToCart(stores, args = {}, { cache = searchCache, 
   }
 
   // Rami Levy adds the whole checked list with one cart sync.
-  const result = await store.callTool('rami_levy_add_items', { items: valid.map((c) => ({ productId: c.productId, name: c.name, price: c.price, qty: c.quantity })) });
+  const call = callRamiCart ?? ((operation, input) => store.callTool(operation, input));
+  const result = await call('rami_levy_add_items', { items: valid.map((c) => ({ productId: c.productId, name: c.name, price: c.price, qty: c.quantity })) });
   const body = parseText(result);
   const refused = new Set(body?.reason === 'items_rejected' && Array.isArray(body.rejected) ? body.rejected.map((r) => String(r.productId)) : []);
   if (result.isError || (body?.ok !== true && !refused.size)) {

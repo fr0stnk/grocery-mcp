@@ -28,23 +28,23 @@ export function ensureLocalOwner(db, env = process.env) {
  * removed when they hold no session.
  */
 export function ensureEnvironmentStoreAccount(db, store, ownerId) {
-  const owned = db
-    .prepare("SELECT * FROM store_accounts WHERE store = ? AND owner_user_id = ? ORDER BY (session_enc IS NOT NULL) DESC, (status = 'environment') ASC, created_at ASC")
-    .all(store, ownerId);
-  if (owned.length) {
-    const [keep, ...rest] = owned;
-    const remove = db.prepare("DELETE FROM store_accounts WHERE id = ? AND status = 'environment' AND session_enc IS NULL");
-    for (const extra of rest) remove.run(extra.id);
-    return keep;
-  }
-  const id = crypto.randomUUID();
-  const at = now();
-  transaction(db, () => {
+  return transaction(db, () => {
+    const owned = db
+      .prepare("SELECT * FROM store_accounts WHERE store = ? AND owner_user_id = ? ORDER BY (session_enc IS NOT NULL) DESC, (status = 'environment') ASC, created_at ASC")
+      .all(store, ownerId);
+    if (owned.length) {
+      const [keep, ...rest] = owned;
+      const remove = db.prepare("DELETE FROM store_accounts WHERE id = ? AND status = 'environment' AND session_enc IS NULL");
+      for (const extra of rest) remove.run(extra.id);
+      return keep;
+    }
+    const id = crypto.randomUUID();
+    const at = now();
     db.prepare('INSERT INTO store_accounts (id, store, owner_user_id, label, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
       .run(id, store, ownerId, 'from the server environment', 'environment', at, at);
     db.prepare('INSERT INTO store_access (store_account_id, user_id, role, created_at) VALUES (?, ?, ?, ?)').run(id, ownerId, 'owner', at);
+    return db.prepare('SELECT * FROM store_accounts WHERE id = ?').get(id);
   });
-  return db.prepare('SELECT * FROM store_accounts WHERE id = ?').get(id);
 }
 
 /** Store accounts a person may use, with their role on each. Secrets are never selected here. */

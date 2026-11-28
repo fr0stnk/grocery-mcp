@@ -1,10 +1,12 @@
-// The low-level Server is used because store tools are forwarded with their
-// JSON Schemas unchanged, which McpServer's zod-based registration cannot do.
+// The low-level Server forwards the adapters' JSON Schemas directly.
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { ACCOUNT_TOOL, AccountMonitor } from './accounts.js';
 import { BASKET_TOOL, compareBasket } from './basket.js';
-import { ADD_BASKET_TOOL, addBasketToCart } from './order.js';
+import { ADD_BASKET_TOOL, addBasketToCart, parseCartRequest } from './order.js';
+import { KEY_SCHEMA, RAMI_ADDS, RAMI_CART_WRITES, normalizeRamiArgs, requestKey } from './cart-args.js';
+import { cartErrorResult, cartJournalUnavailable } from './db/cart-syncs.js';
+import { cartJson, executeRamiCart } from './rami-cart.js';
 import { PREFERENCE_TOOLS, runPreferenceTool } from './preferences.js';
 import { PRICE_HISTORY_TOOL, priceHistory } from './history.js';
 import { SEARCH_TOOL, searchAllStores, searchStore } from './search.js';
@@ -31,6 +33,8 @@ export function buildInstructions(stores, { readOnly }) {
 /** Store tools as clients see them: prefixed name, store label, merged annotations. */
 /** Adapter tools only this server may call; a model must never be offered them (they take passwords). */
 export const HOST_ONLY_TOOLS = new Set(['login_with_password']);
+const textResult = (body) => ({ content: [{ type: 'text', text: JSON.stringify(body, null, 2) }] });
+const SYNC_NOTE = ' If the store confirmation is unavailable, CART_SYNC_UNKNOWN means the store may have applied the request.';
 
 export function forwardedTools(stores, { readOnly }) {
   const routes = new Map();
@@ -39,13 +43,20 @@ export function forwardedTools(stores, { readOnly }) {
       if (HOST_ONLY_TOOLS.has(tool.name)) continue;
       const annotations = { ...tool.annotations, ...store.annotations?.[tool.name] };
       if (readOnly && annotations.readOnlyHint !== true) continue;
+      const mutation = store.id === 'rami-levy' && RAMI_CART_WRITES.has(tool.name);
+      const keyed = mutation && RAMI_ADDS.has(tool.name);
+      const originalDescription = store.descriptions?.[tool.name] ?? tool.description ?? '';
+      const description = mutation
+        ? originalDescription.replace('ok:false with a transport reason means nothing changed. ', '')
+        : originalDescription;
       routes.set(store.exposedName(tool.name), {
         store,
         tool,
         listed: {
           ...tool,
           name: store.exposedName(tool.name),
-          description: `[${store.label}] ${store.descriptions?.[tool.name] ?? tool.description ?? ''}`.trim(),
+          description: `[${store.label}] ${description}${mutation ? SYNC_NOTE : ''}${keyed ? ` ${KEY_SCHEMA.description}` : ''}`.trim(),
+          ...(keyed ? { inputSchema: { ...tool.inputSchema, properties: { ...tool.inputSchema?.properties, idempotency_key: KEY_SCHEMA } } } : {}),
           ...(Object.keys(annotations).length ? { annotations } : {}),
         },
       });
@@ -121,7 +132,10 @@ function withAccountWarnings(name, result, monitor) {
   return warnings.length ? { ...result, accountWarnings: warnings } : result;
 }
 
-export function createGroceryServer(stores, { readOnly = false, log = () => {}, preferences = null, monitor = new AccountMonitor(), history = null, audit = () => {}, delivery = null } = {}) {
+export function createGroceryServer(stores, {
+  readOnly = false, log = () => {}, preferences = null, monitor = new AccountMonitor(), history = null, audit = () => {}, delivery = null,
+  cartJournal = null, userId = null, cartExecutor = executeRamiCart,
+} = {}) {
   const record = (entry) => {
     try {
       audit(entry);
@@ -133,6 +147,23 @@ export function createGroceryServer(stores, { readOnly = false, log = () => {}, 
     { name: 'grocery-mcp', version: FULL_VERSION },
     { capabilities: { tools: { listChanged: true } }, instructions: buildInstructions(stores, { readOnly }) },
   );
+
+  const runCart = (store, operation, key, args, run) => {
+    if (!cartJournal || !store?.storeAccountId) throw cartJournalUnavailable();
+    return cartJournal.run({ accountId: store.storeAccountId, userId, operation, key, args }, (observeSync) =>
+      run((name, input) => cartExecutor(store, name, input, observeSync)));
+  };
+
+  async function callOwn(name, args, own) {
+    if (name === ADD_BASKET_TOOL.name && args.store === 'rami-levy' && !args.dry_run) {
+      const key = requestKey(args, true);
+      const normalized = { store: args.store, dry_run: false, items: parseCartRequest(args) };
+      const store = stores.find((s) => s.id === args.store);
+      return runCart(store, name, key, normalized, async (callRamiCart) =>
+        textResult(await addBasketToCart(stores, normalized, { history, callRamiCart })));
+    }
+    return textResult(withAccountWarnings(name, await own.run(args), monitor));
+  }
 
   async function refreshMissingTools() {
     const missing = stores.filter((s) => !s.tools && s.client);
@@ -151,17 +182,21 @@ export function createGroceryServer(stores, { readOnly = false, log = () => {}, 
     if (own) {
       const started = Date.now();
       try {
-        const result = withAccountWarnings(name, await own.run(args), monitor);
+        const response = await callOwn(name, args, own);
+        const result = cartJson(response);
+        if (response.isError) {
+          record({ tool: name, store: args.store, outcome: result.error.code, durationMs: Date.now() - started });
+          return response;
+        }
         const summary = describeCall(name, args, result);
         log(`call ${name} ${summary} in ${Date.now() - started} ms`);
         record({ tool: name, store: typeof args.store === 'string' ? args.store : null, outcome: 'ok', durationMs: Date.now() - started, details: summary });
         void refreshMissingTools();
-        return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+        return response;
       } catch (error) {
         // Errors of our own tools carry a stable code the client can act on.
-        const body = { error: { code: error.code ?? 'INTERNAL_ERROR', message: error.message, retryable: Boolean(error.retryable) } };
-        record({ tool: name, store: typeof args.store === 'string' ? args.store : null, outcome: body.error.code, durationMs: Date.now() - started });
-        return { isError: true, content: [{ type: 'text', text: JSON.stringify(body) }] };
+        record({ tool: name, store: typeof args.store === 'string' ? args.store : null, outcome: error.code ?? 'INTERNAL_ERROR', durationMs: Date.now() - started });
+        return cartErrorResult(error);
       }
     }
 
@@ -172,17 +207,27 @@ export function createGroceryServer(stores, { readOnly = false, log = () => {}, 
       return { isError: true, content: [{ type: 'text', text }] };
     }
     const started = Date.now();
+    const mutation = route.store.id === 'rami-levy' && RAMI_CART_WRITES.has(route.tool.name);
     try {
       log(`call ${name}`);
-      const result = await route.store.callTool(route.tool.name, args, FORWARD_TIMEOUT_MS);
+      const key = requestKey(args, mutation && RAMI_ADDS.has(route.tool.name));
+      let result;
+      if (mutation) {
+        const input = normalizeRamiArgs(route.tool.name, args);
+        result = await runCart(route.store, route.tool.name, key, input, (call) => call(route.tool.name, input));
+      } else {
+        result = await route.store.callTool(route.tool.name, args, FORWARD_TIMEOUT_MS);
+      }
       const body = (result.content ?? []).filter((c) => c.type === 'text').map((c) => c.text).join('\n');
       const failed = result.isError || /"ok"\s*:\s*false/.test(body);
       if (failed) monitor.observe(route.store.id, false, body);
-      record({ tool: name, store: route.store.id, outcome: failed ? 'STORE_ERROR' : 'ok', durationMs: Date.now() - started });
+      const outcome = mutation && result.isError ? cartJson(result).error?.code ?? 'STORE_ERROR' : failed ? 'STORE_ERROR' : 'ok';
+      record({ tool: name, store: route.store.id, outcome, durationMs: Date.now() - started });
       return result;
     } catch (error) {
       monitor.observe(route.store.id, false, error.message);
-      record({ tool: name, store: route.store.id, outcome: 'STORE_ERROR', durationMs: Date.now() - started });
+      record({ tool: name, store: route.store.id, outcome: error.code ?? 'STORE_ERROR', durationMs: Date.now() - started });
+      if (mutation || error.code === 'INVALID_ARGUMENT') return cartErrorResult(error);
       return { isError: true, content: [{ type: 'text', text: `${route.store.label}: ${error.message}` }] };
     }
   });

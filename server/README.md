@@ -158,6 +158,7 @@ This tool adds several products to **one** store's real cart in a single call, u
 | `store` | `shufersal` or `rami-levy` |
 | `items` | 1–60 of `{ productId, quantity, name?, price? }`. `name` and `price` are only used for Rami Levy products that are not in recent search results. |
 | `dry_run` | Preview only; the cart is not changed |
+| `idempotency_key` | Optional opaque key, 1–128 characters, for Rami Levy additions. Reuse it for the same logical request. |
 
 - **The server checks every product before anything is added, and a dry run uses exactly the same checks.** Each product is looked up in fresh search results (up to 15 minutes old), or else with a live search by its code. Rejected items get a stable code:
   - `PRODUCT_NOT_FOUND` for an unknown product,
@@ -168,8 +169,21 @@ This tool adds several products to **one** store's real cart in a single call, u
   - `PRODUCT_NOT_VERIFIED` for a Rami Levy product that cannot be found again. A product outside the 15-minute search cache is re-checked live: by the barcode it had when this server last saw it (from the price history, up to two days back), otherwise by that name or the given `name`. Rami Levy's catalog cannot be searched by product id, and a caller's name and price are never trusted on their own.
 - Every result line has a `status` (`added`, `would-add` or `rejected`). The summary counts `requested`, `accepted`, `rejected` and `added`, and `complete` is true only when every line went through.
 - **Shufersal:** only the checked items go to the adapter's bulk `add_to_cart`, in one call. The adapter's per-line outcome is reported back. The adapter leaves a product that is already in the cart unchanged, so the server then raises it with `set_quantity` to the existing quantity plus the requested one, and confirms the new quantity in the returned cart (`cartQuantity`). A total above Shufersal's 30-unit limit is rejected as `INVALID_QUANTITY` and nothing is changed.
-- **Rami Levy:** the name and price come from the server's own search results, not from the request (`priceSource: "server"`). A request price that differs is reported as `priceChanged`. A product outside recent results is searched for by its `name`, and refused as `PRODUCT_NOT_VERIFIED` if that search does not return it. Then one `rami_levy_add_items` call adds every checked product with a single cart sync, and quantities are added to what is already there. Products Rami Levy refuses come back as `STORE_REJECTED`, while the rest stay added. A failed sync changes nothing and returns `STORE_ERROR`. The result includes Rami Levy's own `serverTotal`.
+- **Rami Levy:** the name and price come from the server's own search results, not from the request (`priceSource: "server"`). A request price that differs is reported as `priceChanged`. A product outside recent results is searched for by its `name`, and refused as `PRODUCT_NOT_VERIFIED` if that search does not return it. Then the `rami_levy_add_items` handler adds every checked product with a single cart sync, and quantities are added to what is already there. Products Rami Levy refuses come back as `STORE_REJECTED`, while the rest stay added. The result includes Rami Levy's own `serverTotal`. An unconfirmed sync returns `CART_SYNC_UNKNOWN`.
 - Nothing is ordered or paid. Checkout happens in the store's app or site.
+
+### Rami Levy cart retries and journal
+
+The combined MCP server uses the same cart journal for HTTP and stdio. Rami Levy's `add_basket_to_cart`, `rami_levy_add_item`, `rami_levy_add_items` and `rami_levy_reorder_from_history` accept the optional `idempotency_key`. Use a client-generated key for the first attempt, repeat it with the same operation and arguments when retrying, and generate a fresh key for a deliberate second addition. Object property order and explicit default values are equivalent. Product order, quantities, names and caller prices are part of the request. A replay returns the saved result before searching or contacting the adapter.
+
+- `IDEMPOTENCY_KEY_CONFLICT` means the account already used the key for different arguments or a different tool.
+- `CART_SYNC_IN_PROGRESS` means the account has a cart change running. Retry the same request with the same key after it finishes.
+- `CART_SYNC_UNKNOWN` means the store may have applied the change. Inspect the cart on the retailer's site before choosing the next action. The server will not resend the request with that key, including after a restart. An executor that exited mid-call releases the account for a new independent request.
+- `CART_SYNC_UNAVAILABLE` means the journal was unavailable before the write. The server requires a durable reservation before contacting the adapter for a mutation. The server returns `INVALID_ARGUMENT` for a key supplied on a Shufersal request.
+
+Calls without a key still add normally. They are recorded and serialized with other writes, including `rami_levy_remove_item` and `rami_levy_clear_cart`. A dry run is a preview and reserves no key. The journal distinguishes completed writes, partial acceptance, confirmed no write, and unknown outcomes. It records the account, caller ID, operation, timestamps, and the public fields needed for replay. Rami Levy syncs the entire cart. `rami_levy_view_cart` reads the adapter's persistent local cart, and a local rollback cannot confirm the retailer's state.
+
+The guarantee covers combined processes sharing both the grocery database volume and the Rami Levy cart volume. Keep `grocery.db` and its adjacent `.cart-locks` directory on shared local storage that supports SQLite locks. Direct calls to a standalone retailer adapter or edits on the retailer's website are outside this guarantee. The default Rami adapter runs its cart handlers in the combined process, so the account lock remains held after an MCP request times out until the handler finishes.
 
 ### `server_info` and version reporting
 
@@ -364,7 +378,7 @@ The adapters read their own variables, listed in the root `.env.example`. The se
 |---|---|---|
 | `GROCERY_STORES` | `shufersal,rami-levy` | Stores to run, comma-separated |
 | `GROCERY_SHUFERSAL_ENTRY` | `upstream/shufersal-cart/bin/shufersal-mcp.mjs` | Shufersal adapter entry point, relative to the repository root |
-| `GROCERY_RAMI_LEVY_ENTRY` | `upstream/rami-levy-mcp/dist/index.js` | Rami Levy adapter entry point, relative to the repository root |
+| `GROCERY_RAMI_LEVY_ENTRY` | `upstream/rami-levy-mcp/dist/index.js` | Rami Levy adapter entry point, relative to the repository root. Combined cart writes load its sibling `store.js`, `client.js` and `tools.js` adapter modules. |
 | `GROCERY_RAMI_LEVY_SEARCH` | catalog | Set to `adapter` to search Rami Levy through the adapter's tool instead of its catalog API |
 | `GROCERY_SHUFERSAL_SEARCH` | direct | Set to `adapter` to always search Shufersal through the adapter's tool |
 | `GROCERY_SHUFERSAL_ORIGIN` | `https://www.shufersal.co.il` | Shufersal origin override, used by the tests |
@@ -449,15 +463,16 @@ The tests use stand-in adapters from `test/fixtures/`, so they need no credentia
 | `src/web/` | The account page: profile, address and store logins, with its listener guard, CSRF and page markup |
 | `src/shufersal-session.js` | Reads and writes the Shufersal adapter's cookie jar for the session vault |
 | `src/rami-curl.js` | Reads a Rami Levy login from DevTools' "Copy as cURL" |
-| `src/db/` | Database: migrations, encryption vault, people, sign-in identities and store accounts, preferences, audit log, and the import of older files |
+| `src/db/` | Database: migrations, encryption vault, people, sign-in identities and store accounts, preferences, audit log, cart sync journal and import of older files |
 | `src/history.js` | Price history: SQLite recording, `price_history` and the daily preference tracker |
 | `src/version.js` | Version from `package.json`, and build info: commit, build date, image tag and upstream commits |
 | `src/cache.js` | Search cache with stale fallback, and the per-store concurrency limiter |
 | `src/normalize.js` | Converts each store's results to the shared shape, and parses sizes, prices, barcodes and promotions |
 | `src/shufersal-search.js` | Direct Shufersal search with the adapter's saved session, read-only |
 | `src/rami-catalog.js` | Client for Rami Levy's public catalog search |
+| `src/rami-cart.js` | Runs the pinned adapter's Rami Levy cart handlers and captures the sync outcome |
 
-`src/app.js` uses the SDK's low-level `Server` class instead of `McpServer`. Forwarded tools keep their JSON Schemas, which `McpServer`'s zod-based registration cannot take.
+`src/app.js` uses the SDK's low-level `Server` class to publish the adapters' JSON Schemas. The combined server adds `idempotency_key` to the supported Rami Levy write tools.
 
 ## Adding a store
 
