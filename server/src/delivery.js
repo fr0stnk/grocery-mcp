@@ -57,7 +57,7 @@ export function createDelivery(env = process.env, { fetchShufersalFee = fetchShu
     if (storeId !== 'shufersal') return null;
     const hit = cache.get(storeId);
     if (hit && now() - hit.at < CACHE_MS) return hit.fee;
-    let fee = null;
+    let fee;
     try {
       fee = await fetchShufersalFee({ cookieFile: env.SHUFERSAL_COOKIE_FILE, origin: env.GROCERY_SHUFERSAL_ORIGIN || undefined });
     } catch {
