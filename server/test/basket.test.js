@@ -143,6 +143,7 @@ test('compareBasket honours the requested size, count and grade (review G-01)', 
   assert.deepEqual([milk.identical, milk.offers.shufersal.productId, milk.offers['rami-levy'].productId], [true, 'P_1L', '10'], '1 L, not the 2 L ranked first');
   assert.deepEqual(milk.constraints, { size: '1 L', percent: 3 });
   assert.equal(eggs.offers.shufersal, null, 'neither 18 L nor 12 M eggs are 12 L eggs');
+  assert.equal(eggs.nearest.shufersal.productId, 'P_18', 'the 18 L eggs are reported as the nearest, outside every total');
   assert.equal(eggs.offers['rami-levy'].productId, '40');
   assert.deepEqual(out.totals.shufersal.missing, ['ביצים 12 L']);
   assert.ok(out.notes.some((n) => /rather than offering a different one/.test(n)));

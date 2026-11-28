@@ -206,6 +206,10 @@ test('GROC-040: a stated count keeps out products that state none (egg salad, eg
   const [thirty, large] = out.items;
   assert.deepEqual([thirty.offers.shufersal, thirty.offers['rami-levy']?.name], [null, 'ביצים 30יח בינוני M'], 'the 30-pack, not a cheaper noodle pack taking it for an outlier');
   assert.deepEqual([large.offers.shufersal, large.offers['rami-levy']], [null, null], 'no 30 L eggs: missing, not egg salad');
+  assert.deepEqual(thirty.nearest, { shufersal: { productId: 'shufersal0', name: 'ביצים ארוזות L 18', count: 18, price: 21.81, pricePerUnit: 1.21, perUnit: 'pc', wanted: '30-pack' } });
+  assert.equal(large.nearest['rami-levy'].productId, 'rami-levy1', 'the nearest keeps the requested grade: 12 L, not 30 M');
+  assert.deepEqual([out.totals.shufersal.total, out.totals['rami-levy'].total, out.split?.total], [0, 33.4, 33.4], 'a nearest product is in no total');
+  assert.ok(out.notes.some((n) => /^shufersal has no 30-pack for ביצים 30; the nearest is 18 at ₪21.81 \(₪1.21 each\).*Ask the user/.test(n)));
 });
 
 test('GROC-044: a product in another form than the query names is flagged, and loses to one in that form', () => {
@@ -214,6 +218,16 @@ test('GROC-044: a product in another form than the query names is flagged, and l
   const picked = bestCandidates([{ name: 'סבון אסלה לימון' }, { name: 'ג׳ל ניקוי אסלה לימון' }, { name: 'גל ניקוי אסלה לימון ליים' }], 'גל ניקוי אסלה לימון ליים');
   assert.deepEqual(picked.map((x) => [x.name, x.lacks]), [['גל ניקוי אסלה לימון ליים', undefined]]);
   assert.equal(bestCandidates([{ name: 'תרסיס לניקוי חלונות' }], 'ספריי לניקוי חלונות')[0].lacks, undefined, 'another spelling of the same form');
+});
+
+test('a store without the requested size reports the nearest one, per litre', async () => {
+  const shop = { id: 'rami-levy', label: 'Rami Levy', search: { maxLimit: 20, run: async () => [
+    { store: 'rami-levy', productId: '2', barcode: null, name: 'חלב 3% 2 ליטר', size: '2 L', price: 14.9, priceBasis: 'unit' },
+    { store: 'rami-levy', productId: '3', barcode: null, name: 'חלב 3% 3 ליטר', size: '3 L', price: 21, priceBasis: 'unit' },
+  ] } };
+  const out = await compareBasket([shop], { items: [{ query: 'חלב 3% 1 ליטר' }] }, { cache: new SearchCache() });
+  assert.deepEqual([out.items[0].offers['rami-levy'], out.items[0].nearest['rami-levy'].size, out.items[0].nearest['rami-levy'].pricePerUnit], [null, '2 L', 7.45]);
+  assert.ok(out.notes.some((n) => /Rami Levy has no 1 L .*\(₪7.45 per L\)/.test(n)));
 });
 
 test('GROC-008: a flavoured bread loses to plain bread, and is flagged when it is all a store has', () => {

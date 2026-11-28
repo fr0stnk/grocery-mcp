@@ -25,6 +25,7 @@ export const BASKET_TOOL = {
     'split.withDelivery add one fee per store ordered from, so a split order pays two. A store with belowMinimum: true cannot take the basket as it is; say so. ' +
     'For weighed items (soldByWeight) the quantity is in kilograms; Shufersal packaged produce is priced per kg but sold in whole packs: such offers carry packs ' +
     '(quantity ÷ packWeightKg, rounded, half up, at least 1), packWeightKg and packPrice, and add_basket_to_cart takes packs as their quantity. ' +
+    'A store with nothing of the requested count or size has the item missing, and the closest product it has is in items[].nearest.<store> (productId, name, count or size, price, pricePerUnit): it is in no total, so ask the user before using it. ' +
     'A multipack of the requested size (6×1.5 L for 1.5 ליטר) is offered only when nothing single is, marked unrequested on the offer and the item. Items may name a saved household preference instead of a query, ' +
     'and usual: true adds every preference in the usual basket. ' +
     'To price a past order in every store ("what would last week\'s order cost at Rami Levy?"), pass source: {store, order: "latest" or an order code}; ' +
@@ -188,6 +189,41 @@ function fitting(list, constraints) {
   return { list: [...ok, ...unknown], rejected: scored.length - ok.length - unknown.length };
 }
 
+
+/**
+ * For a store with nothing of the requested count or size: the product of
+ * the requested kind closest to it (18 eggs for "ביצים 30"), or null. It is
+ * only reported, never priced into a total.
+ */
+function nearestOf(list, constraints, query) {
+  const attr = constraints.count ? 'count' : constraints.size ? 'size' : null;
+  if (!attr) return null;
+  const { [attr]: want, ...rest } = constraints;
+  const amountOf = (x) => {
+    if (attr === 'count') return STATED.count(x)?.[0] ?? null;
+    const sz = sizeOf(x);
+    return sz && sz.unit === want.unit ? sz.amount : null;
+  };
+  const stating = fitting(usable(list), rest).list.filter((x) => amountOf(x) != null);
+  const target = attr === 'count' ? want : want.amount;
+  const [best] = bestCandidates(stating, query)
+    .filter((x) => !x.unrequested && !x.lacks)
+    .map((x, i) => [x, Math.abs(amountOf(x) - target), i])
+    .sort((a, b) => a[1] - b[1] || a[2] - b[2])
+    .map(([x]) => x);
+  if (!best) return null;
+  const amount = amountOf(best);
+  const each = round(best.price / amount);
+  return {
+    productId: best.productId,
+    name: best.name,
+    ...(attr === 'count' ? { count: amount } : { size: `${amount} ${want.unit}` }),
+    price: best.price,
+    pricePerUnit: each,
+    perUnit: attr === 'count' ? 'pc' : want.unit,
+    wanted: attr === 'count' ? `${want}-pack` : want.label,
+  };
+}
 
 /**
  * Chooses one product per store for an item. A pinned barcode must match
@@ -648,6 +684,12 @@ export async function compareBasket(stores, args = {}, { timeoutMs = 45_000, cac
         }
       }
     }
+    const nearest = {};
+    for (const s of selected) {
+      if (matches[s.id] || it.barcode) continue;
+      const near = nearestOf(lists[s.id], constraints, it.query);
+      if (near) nearest[s.id] = near;
+    }
     const offers = Object.fromEntries(selected.map((s) => {
       const m = matches[s.id];
       let o = offer(m, it.packs && m && (m.priceBasis ?? 'unit') !== 'kg' ? it.packs : it.quantity);
@@ -677,6 +719,7 @@ export async function compareBasket(stores, args = {}, { timeoutMs = 45_000, cac
       cheapestStore: equivalence && equivalence !== 'match' ? null : cheapest(offers),
       ...(unitPriceComparison ? { unitPriceComparison } : {}),
       offers,
+      ...(Object.keys(nearest).length ? { nearest } : {}),
     };
   });
 
@@ -757,6 +800,13 @@ export async function compareBasket(stores, args = {}, { timeoutMs = 45_000, cac
   if (lines.some((l) => Object.values(l.offers).some((o) => o?.unrequested))) notes.push('Offers with unrequested are the closest product a store has, but carry a variant or pack the query did not ask for (Diet, flavoured, frozen, a six-pack); confirm them with the user.');
   if (lines.some((l) => Object.values(l.offers).some((o) => o?.lacks))) notes.push('Offers with lacks are the closest product a store has, but not in the form the query names (a spray, a gel, tablets); confirm them with the user.');
   if (lines.some((l) => Object.values(l.offers).some((o) => o?.fit === 'unverified'))) notes.push('Offers with fit: unverified could not be checked against the size, count or grade in the query; confirm them.');
+  for (const l of lines) {
+    for (const [id, n] of Object.entries(l.nearest ?? {})) {
+      const label = selected.find((st) => st.id === id)?.label ?? id;
+      const each = n.perUnit === 'pc' ? 'each' : `per ${n.perUnit}`;
+      notes.push(`${label} has no ${n.wanted} for ${l.query}; the nearest is ${n.count ?? n.size} at ₪${n.price} (₪${n.pricePerUnit} ${each}), in items[].nearest and in no total. Ask the user before using it.`);
+    }
+  }
   if (lines.some((l) => l.constraints && Object.values(l.offers).some((o) => !o))) notes.push('A store with no product matching the size, count or grade in the query lists the item as missing rather than offering a different one.');
   const foreign = lines.filter((l) => untranslated(l)).map((l) => l.query);
   if (foreign.length) notes.push(`The store catalogs are in Hebrew and these items have no Hebrew letters: ${foreign.join(', ')}. Their offers are marked ${UNTRANSLATED} and left out of every total. Translate them to Hebrew (for example milk → חלב) and compare again.`);
