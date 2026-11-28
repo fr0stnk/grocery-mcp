@@ -1,6 +1,6 @@
 {
   "name": "grocery-mcp",
-  "version": "0.18.4",
+  "version": "0.18.5",
   "private": true,
   "description": "One MCP server for Rami Levy and Shufersal",
   "type": "module",
