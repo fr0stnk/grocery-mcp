@@ -56,6 +56,11 @@ services:
       - GROCERY_HTTP=127.0.0.1:8791
       - GROCERY_ACCOUNT_HTTP
       - GROCERY_ACCOUNT_HOSTS
+      - GROCERY_PUBLIC_HTTP
+      - GROCERY_PUBLIC_URL
+      - GROCERY_OAUTH_ISSUER
+      - GROCERY_OAUTH_AUDIENCE
+      - GROCERY_OAUTH_USERS
     volumes:
       - rami-data:/data/rami-levy
       - shufersal-data:/data/shufersal

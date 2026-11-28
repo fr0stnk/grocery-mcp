@@ -68,6 +68,10 @@ ssh -N -L 8795:<tailnet address>:8795 <server>
 
 Then open `http://localhost:8795/account`.
 
+### Sign-in on a public URL
+
+For connectors that sign in with OAuth instead of a tunnel, set `GROCERY_PUBLIC_HTTP`, `GROCERY_PUBLIC_URL` and `GROCERY_OAUTH_ISSUER`, and put a reverse proxy with HTTPS in front of the listener. The issuer is an OpenID provider such as Pocket ID. The owner and the people listed in `GROCERY_OAUTH_USERS` can sign in, each with their own preferences, sharing the owner's store accounts. See [server/README.md](server/README.md#sign-in).
+
 ## Credentials
 
 Docker Compose reads `.env` from the repository root, and git ignores it. Wrap each value in single quotes. Compose then keeps characters such as `$`, `!`, `#` and spaces exactly as written. A value itself cannot contain a single quote.

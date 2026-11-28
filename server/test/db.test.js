@@ -15,16 +15,16 @@ const tempDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'grocery-db-'));
 test('the database migrates once, also when opened again, and is private to its owner', async () => {
   const file = path.join(tempDir(), 'nested', 'grocery.db');
   const db = await openDatabase(file);
-  assert.deepEqual(db.prepare('SELECT version FROM schema_migrations').all().map((r) => r.version), [1]);
+  assert.deepEqual(db.prepare('SELECT version FROM schema_migrations').all().map((r) => r.version), [1, 2]);
   assert.deepEqual(migrate(db), [], 'nothing left to apply');
   const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all().map((r) => r.name);
-  for (const t of ['users', 'store_accounts', 'store_access', 'addresses', 'preferences', 'carts', 'cart_syncs', 'audit_log', 'prices']) assert.ok(tables.includes(t), t);
+  for (const t of ['users', 'identities', 'store_accounts', 'store_access', 'addresses', 'preferences', 'carts', 'cart_syncs', 'audit_log', 'prices']) assert.ok(tables.includes(t), t);
   assert.equal(fs.statSync(file).mode & 0o777, 0o600);
   db.close();
   const again = await openDatabase(file);
-  assert.equal(again.prepare('SELECT COUNT(*) AS n FROM schema_migrations').get().n, 1);
-  assert.throws(() => migrate(again, [{ version: 2, name: 'broken', sql: 'CREATE TABLE nope (' }]), /migration 2 \(broken\) failed/);
-  assert.equal(again.prepare('SELECT COUNT(*) AS n FROM schema_migrations').get().n, 1, 'a failed migration is rolled back');
+  assert.equal(again.prepare('SELECT COUNT(*) AS n FROM schema_migrations').get().n, 2);
+  assert.throws(() => migrate(again, [{ version: 99, name: 'broken', sql: 'CREATE TABLE nope (' }]), /migration 99 \(broken\) failed/);
+  assert.equal(again.prepare('SELECT COUNT(*) AS n FROM schema_migrations').get().n, 2, 'a failed migration is rolled back');
   again.close();
 });
 

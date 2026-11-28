@@ -4,12 +4,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { AccountMonitor } from './accounts.js';
+import { createTokenVerifier, oauthConfig } from './auth.js';
 import { createGroceryServer } from './app.js';
 import { createStores } from './config.js';
 import { createDelivery } from './delivery.js';
 import { PreferenceStore } from './preferences.js';
 import { bootstrap } from './db/bootstrap.js';
 import { databaseFile, openDatabase } from './db/database.js';
+import { parseMembers, signIn } from './db/identities.js';
 import { recordAudit } from './db/people.js';
 import { DbPreferenceStore } from './db/preferences.js';
 import { createVault } from './db/vault.js';
@@ -45,12 +47,17 @@ for (const s of stores) Object.assign(s.env, STORE_ENV[s.id] ?? {});
 const monitor = new AccountMonitor();
 const delivery = createDelivery(process.env);
 const historyOff = /^(0|false|no|off)$/i.test(process.env.GROCERY_PRICE_HISTORY ?? '');
+// Fails at startup when sign-in is half configured, rather than serving the public listener without it.
+const oauth = oauthConfig(process.env);
+const members = oauth ? parseMembers(process.env.GROCERY_OAUTH_USERS) : null;
 
 // The database holds people, store accounts, preferences, prices and the audit
 // log. If it cannot be opened, the server still runs on the older files.
 let preferences = new PreferenceStore();
 let history = historyOff ? null : new PriceHistory();
 let audit = () => {};
+let auditFor = () => audit;
+let people = null;
 try {
   const file = databaseFile();
   const db = await openDatabase(file);
@@ -58,8 +65,10 @@ try {
   const accountOf = new Map(accounts.map((a) => [a.store, a.id]));
   preferences = new DbPreferenceStore(db, owner.id);
   history = historyOff ? null : new PriceHistory(undefined, { db });
-  audit = ({ tool, store, outcome, durationMs, details }) =>
-    recordAudit(db, { userId: owner.id, storeAccountId: accountOf.get(store) ?? null, tool, outcome, durationMs, details });
+  auditFor = (userId) => ({ tool, store, outcome, durationMs, details }) =>
+    recordAudit(db, { userId, storeAccountId: accountOf.get(store) ?? null, tool, outcome, durationMs, details });
+  audit = auditFor(owner.id);
+  people = { db, ownerId: owner.id };
   const vault = createVault();
   log(`database ${file}: ${accounts.length} store accounts${vault.available ? `, master key v${vault.keyVersion}` : ', no master key yet (GROCERY_MASTER_KEY)'}`);
 
@@ -164,6 +173,32 @@ process.on('SIGTERM', () => void shutdown(143));
 
 if (httpListen) {
   await startHttpServer({ ...httpListen, makeServer: () => createGroceryServer(stores, { readOnly, log, preferences, monitor, history, audit, delivery }), log });
+  if (oauth && !people) log('sign-in is configured but the database is unavailable, so the public listener is not started');
+  else if (oauth) {
+    const verify = createTokenVerifier({ issuer: oauth.issuer, audience: oauth.audience });
+    const { db, ownerId } = people;
+    await startHttpServer({
+      ...parseListen(oauth.listen),
+      extraHosts: [oauth.publicHost],
+      auth: {
+        config: oauth,
+        authenticate: async (token) => {
+          const claims = await verify(token);
+          return signIn(db, { issuer: oauth.issuer, subject: claims.sub, email: claims.email }, { ownerId, ownerEmail: process.env.GROCERY_OWNER_EMAIL, members });
+        },
+      },
+      makeServer: (who) => createGroceryServer(stores, {
+        readOnly: readOnly || who.role === 'viewer',
+        log,
+        preferences: new DbPreferenceStore(db, who.userId),
+        monitor,
+        history,
+        audit: auditFor(who.userId),
+        delivery,
+      }),
+      log: (m) => log(`public: ${m}`),
+    });
+  }
   // Only the long-running server tracks prices; one-shot stdio runs just record what they search.
   if (history) startTracker({ preferences, stores, search: (store, q) => searchStore(store, q), log });
 } else {

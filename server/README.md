@@ -312,6 +312,20 @@ Tools forwarded from the store adapters keep the adapters' own messages.
 - The server exits when the client closes stdin, and stops its adapters. The SDK's stdio transport does not do this by itself, and the open adapter pipes would otherwise keep the process running.
 - Adapter stderr is forwarded with a `[shufersal]` or `[rami-levy]` prefix. The server's own messages use `[grocery]`.
 
+## Sign-in
+
+With `GROCERY_PUBLIC_HTTP` set (HTTP mode only), the server opens a second listener for clients that sign in with OAuth, such as ChatGPT and Claude connectors on a public URL. It is meant to sit behind a reverse proxy with HTTPS. The loopback listener on `GROCERY_HTTP`, which the tunnels and the bridge use, stays without sign-in until they are retired.
+
+The server is an OAuth resource server (`src/auth.js`), not a login service:
+
+- `/.well-known/oauth-protected-resource` and `/.well-known/oauth-protected-resource/mcp` (RFC 9728) name the authorization server, `GROCERY_OAUTH_ISSUER`.
+- A request without a token gets `401` with `WWW-Authenticate: Bearer resource_metadata="…"`, which starts the client's sign-in. A bad token gets `401` with `error="invalid_token"`.
+- Tokens are JWTs. Each is checked against the issuer's keys, found through its discovery document and cached for 10 minutes, with an unknown key id refetching them. The checks cover the signature (asymmetric algorithms only), `iss`, `aud` (the public URL's `/mcp`, or `GROCERY_OAUTH_AUDIENCE`), `exp` and `nbf`. Clients ask for that audience with the RFC 8707 `resource` parameter.
+- The token's subject is a sign-in identity (`identities`, migration 2) linked to a person. On first sign-in the token's `email` claim links it: the owner's address (`GROCERY_OWNER_EMAIL`) links to the owner, and an address in `GROCERY_OAUTH_USERS` creates that person and gives them the owner's store accounts in their role. Anyone else gets `403`, and so does a person later removed from the list or disabled.
+- Each person gets their own preferences and audit trail. A `viewer` gets the read-only tools; the owner and a `shopper` get all of them, on the shared store accounts.
+
+The provider must put `email` in access tokens and support RFC 8707 resources and a way for clients to register. Pocket ID does this with Client ID Metadata Documents (CIMD), which ChatGPT and Claude use. Its CIMD allowlist must include the clients' metadata URLs, and the Grocery API must be granted to CIMD clients.
+
 ## HTTP mode
 
 With `GROCERY_HTTP=127.0.0.1:8791`, the server listens at `http://127.0.0.1:8791/mcp`:
@@ -351,6 +365,11 @@ The adapters read their own variables, listed in the root `.env.example`. The se
 | `GROCERY_SHUFERSAL_SERVICE_FEE`, `GROCERY_RAMI_LEVY_SERVICE_FEE` | none | Service fee per order in ₪, added to the delivery fee |
 | `GROCERY_HISTORY_FILE` | `$GROCERY_DATA_DIR/price-history.db` | Price history file, used only when the database is unavailable, and by the tests |
 | `GROCERY_PRICE_HISTORY` | on | `off` stops recording prices and hides `price_history` |
+| `GROCERY_PUBLIC_HTTP` | unset | `host:port` for the signed-in listener (see [Sign-in](#sign-in)); needs the next two |
+| `GROCERY_PUBLIC_URL` | unset | The public `https://` origin in front of that listener |
+| `GROCERY_OAUTH_ISSUER` | unset | The OpenID provider whose tokens are accepted |
+| `GROCERY_OAUTH_AUDIENCE` | `$GROCERY_PUBLIC_URL/mcp` | The audience tokens must carry |
+| `GROCERY_OAUTH_USERS` | unset | Who besides the owner may sign in: `email:shopper` or `email:viewer`, comma-separated |
 | `GROCERY_HTTP` | unset, which means stdio | Serve Streamable HTTP on `port` or `host:port`. The host defaults to `127.0.0.1`. |
 | `GROCERY_READ_ONLY` | off | When `1`, only tools annotated `readOnlyHint` are listed, and other forwarded tools are refused. `search_all_stores` always works. |
 
@@ -398,7 +417,8 @@ The tests use stand-in adapters from `test/fixtures/`, so they need no credentia
 |---|---|
 | `src/index.js` | Entry point: starts the stores, then serves stdio or HTTP, and handles shutdown |
 | `src/app.js` | Builds an MCP server: tool listing with annotations, read-only filtering, call routing and instructions |
-| `src/http.js` | Stateless Streamable HTTP listener with health check, body limit and Host check |
+| `src/http.js` | Stateless Streamable HTTP listener with health check, body limit, Host check and optional sign-in |
+| `src/auth.js` | Sign-in for the public listener: protected-resource metadata, the 401 challenge and JWT access-token checks |
 | `src/config.js` | Store definitions and adapter entry points |
 | `src/stores.js` | `StoreClient`: one adapter process, with startup, restart and stderr capture |
 | `src/search.js` | `search_all_stores`, per-store cached search and barcode grouping |
@@ -412,7 +432,7 @@ The tests use stand-in adapters from `test/fixtures/`, so they need no credentia
 | `src/web/` | The account page: profile, address and store logins, with its listener guard, CSRF and page markup |
 | `src/shufersal-session.js` | Reads and writes the Shufersal adapter's cookie jar for the session vault |
 | `src/rami-curl.js` | Reads a Rami Levy login from DevTools' "Copy as cURL" |
-| `src/db/` | Database: migrations, encryption vault, people and store accounts, preferences, audit log, and the import of older files |
+| `src/db/` | Database: migrations, encryption vault, people, sign-in identities and store accounts, preferences, audit log, and the import of older files |
 | `src/history.js` | Price history: SQLite recording, `price_history` and the daily preference tracker |
 | `src/version.js` | Version from `package.json`, and build info: commit, build date, image tag and upstream commits |
 | `src/cache.js` | Search cache with stale fallback, and the per-store concurrency limiter |

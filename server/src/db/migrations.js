@@ -126,4 +126,22 @@ export const MIGRATIONS = [
       CREATE INDEX IF NOT EXISTS prices_barcode ON prices (barcode, day);
     `,
   },
+  {
+    version: 2,
+    name: 'sign-in identities',
+    // A person may sign in through more than one identity provider, and the owner's
+    // row predates sign-in, so identities are their own table rather than users.idp_sub.
+    sql: `
+      CREATE TABLE identities (
+        issuer TEXT NOT NULL,
+        subject TEXT NOT NULL,
+        user_id TEXT NOT NULL REFERENCES users(id),
+        email TEXT,
+        created_at TEXT NOT NULL,
+        last_seen_at TEXT,
+        PRIMARY KEY (issuer, subject)
+      );
+      CREATE INDEX identities_user ON identities (user_id);
+    `,
+  },
 ];
