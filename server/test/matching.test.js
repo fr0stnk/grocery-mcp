@@ -291,3 +291,12 @@ test('GROC-032/033: tea bags are not a multipack, rolls and envelopes are counts
   assert.equal(bestCandidates([{ name: 'תה שחור קלאסי טעם עשיר ויסוצקי 120 שקיקים' }], 'תה שחור')[0].unrequested, undefined);
   assert.ok(bestCandidates([{ name: 'תה בטעם לימון' }], 'תה')[0].unrequested);
 });
+
+test('GROC-035: sorted by price, a product with another percentage does not top a percentage query', async () => {
+  const st = (id, list) => ({ id, label: id, search: { maxLimit: 20, run: async () => list } });
+  const list = [{ store: 'rami-levy', productId: '1', name: 'חלב תנובה 1% 1 לי', price: 6.8, pricePerUnit: 6.8, perUnit: 'L' }, { store: 'rami-levy', productId: '3', name: 'חלב תנובה 3% שומן 1 ל', price: 7.2, pricePerUnit: 7.2, perUnit: 'L' }];
+  for (const sortBy of ['unitPrice', 'price']) {
+    const out = await searchAllStores([st('rami-levy', list)], { query: 'חלב 3%', sortBy }, { cache: new SearchCache() });
+    assert.deepEqual(out.results.map((r) => r.productId), ['3', '1'], sortBy);
+  }
+});

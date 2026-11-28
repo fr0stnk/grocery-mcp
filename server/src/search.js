@@ -6,6 +6,7 @@ import { isAbout, matchedTerms, queryTerms, stemOf, withoutPackaging } from './m
 /** Shared by every request in this process; see cache.js for the freshness rules. */
 export const searchCache = new SearchCache();
 const FETCH_SIZE = 20;
+const PERCENT = /(\d+(?:[.,]\d+)?)\s*%/u;
 const PER_STORE_CONCURRENCY = 4;
 
 export const SEARCH_TOOL = {
@@ -121,14 +122,20 @@ export async function searchAllStores(stores, args = {}, { timeoutMs = 45_000, c
     }
   });
   // Array.prototype.sort is stable, so equal ranks keep the stores' order.
+  // Sorted by price, products stating another percentage than the query's go last: 1% milk must not top "חלב 3%".
+  const wanted = PERCENT.exec(query)?.[1];
+  const offPercent = (r) => {
+    const stated = wanted ? [...String(r.name ?? '').matchAll(new RegExp(PERCENT, 'gu'))].map((m) => m[1]) : [];
+    return stated.length && !stated.some((v) => Number(v.replace(',', '.')) === Number(wanted.replace(',', '.'))) ? 1 : 0;
+  };
   if (sortBy === 'unitPrice') {
     // Prices per kg, litre and piece are not comparable: each unit is sorted as its own group,
     // groups in the order they first appear by relevance, items without a unit price last.
     const groups = [...new Set(results.filter((r) => r.perUnit).sort((a, b) => a.rank - b.rank).map((r) => r.perUnit))];
     const group = (r) => (r.perUnit ? groups.indexOf(r.perUnit) : groups.length);
-    results.sort((a, b) => group(a) - group(b) || compareItems(a, b));
+    results.sort((a, b) => offPercent(a) - offPercent(b) || group(a) - group(b) || compareItems(a, b));
   }
-  else if (sortBy === 'price') results.sort((a, b) => (a.price ?? Infinity) - (b.price ?? Infinity));
+  else if (sortBy === 'price') results.sort((a, b) => offPercent(a) - offPercent(b) || (a.price ?? Infinity) - (b.price ?? Infinity));
   else results.sort((a, b) => a.rank - b.rank);
   // The catalogs are Hebrew; a Latin or Cyrillic query usually finds nothing useful.
   const hint = /[\u0590-\u05FF]/.test(query) || /^\d+$/.test(query)
