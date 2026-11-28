@@ -86,3 +86,38 @@ services:
       - ./tunnel/runtime/tunnel-client:/opt/tunnel-client:ro
       - ./tunnel/extra.yaml:/config/tunnel.yaml:ro
       - ./tunnel/secrets/extra.key:/run/secrets/openai-tunnel.key:ro
+
+  # Pocket ID, the sign-in service for the public listener (see deploy/README.md).
+  # Off unless the auth profile is enabled:
+  #   docker compose -f compose.yaml -f compose.tunnel.yaml --profile auth up -d pocket-id
+  pocket-id:
+    # v2.19.3-distroless, pinned by its multi-arch index digest. It runs as user 65532 with no shell.
+    image: ghcr.io/pocket-id/pocket-id:v2.19.3-distroless@sha256:6a0045a89b80fa6624c091786e7be132a4dde880ca64727a6b019c056b091982
+    profiles: [auth]
+    restart: unless-stopped
+    # Host networking with HOST=127.0.0.1 keeps it on loopback, reachable only through the reverse proxy.
+    network_mode: host
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 128
+    tmpfs: ["/tmp:size=32m,noexec,nosuid,nodev"]
+    environment:
+      # Both come from the ignored .env; Pocket ID refuses to start without the encryption key.
+      # Required (:?) would break every compose command while the profile is off.
+      - APP_URL=${POCKET_ID_URL:-}
+      - ENCRYPTION_KEY=${POCKET_ID_ENCRYPTION_KEY:-}
+      - HOST=127.0.0.1
+      - PORT=1411
+      # The proxy runs on this host and connects from loopback.
+      - TRUST_PROXY=127.0.0.1
+      # Hosts Pocket ID may fetch client metadata documents (CIMD) from, comma-separated; see deploy/README.md.
+      - OUTBOUND_ALLOWED_HOSTS_CLIENT_METADATA=${POCKET_ID_METADATA_HOSTS:-}
+    volumes:
+      - pocket-id-data:/app/data
+    logging:
+      driver: json-file
+      options: {max-size: "5m", max-file: "2"}
+
+volumes:
+  pocket-id-data:

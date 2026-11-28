@@ -326,6 +326,20 @@ The server is an OAuth resource server (`src/auth.js`), not a login service:
 
 The provider must issue JWT access tokens, support RFC 8707 resources, answer userinfo for tokens with the `openid` and `email` scopes, and offer a way for clients to register. Pocket ID does this with Client ID Metadata Documents (CIMD), which ChatGPT and Claude use. Its CIMD allowlist must include the clients' metadata URLs, and the Grocery API must be granted to CIMD clients.
 
+### Deploying sign-in
+
+A checklist for the public URL with Pocket ID, using `example.com` as a placeholder. The files are in [`../deploy/`](../deploy/README.md).
+
+1. **DNS**: point `grocery.example.com` and `id.example.com` at the server's public address (A and AAAA records).
+2. **Pocket ID**: in `.env`, set `POCKET_ID_URL=https://id.example.com` and `POCKET_ID_ENCRYPTION_KEY` (`openssl rand -base64 32`). Start it with `docker compose -f compose.yaml -f compose.tunnel.yaml --profile auth up -d pocket-id`. It listens on `127.0.0.1:1411` only. The URL cannot change later without re-registering passkeys, which are bound to its domain.
+3. **TLS and proxy**: copy `deploy/nginx/grocery.conf.example`, replace the domains, and get certificates with `sudo certbot --nginx -d grocery.example.com -d id.example.com`. Check with `sudo nginx -t`, then reload.
+4. **First admin and passkeys**: open `https://id.example.com/setup`, create the owner account and register a passkey. Add each other person with the email from `GROCERY_OAUTH_USERS`, and have them register their own passkey.
+5. **Verified email**: the server links a first sign-in only by a verified email. Turn on email verification in Pocket ID, or mark the owner's and each person's address as verified in the admin UI.
+6. **The Grocery API**: under Administration → APIs, create an API whose resource is exactly `https://grocery.example.com/mcp`, which cannot be changed later. Allow the `openid` and `email` scopes, and turn on "Allow all metadata document clients", so that ChatGPT and Claude, which register through CIMD, are granted it.
+7. **CIMD**: in the admin UI under Application Configuration → OIDC, enable Client ID Metadata Documents and add the clients' metadata URLs to the allowlist. Keep this in the UI: the `CIMD_URL_ALLOWLIST` variable only works with `UI_CONFIG_DISABLED=true`, which locks the admin settings. Set `POCKET_ID_METADATA_HOSTS` to the hosts those documents are fetched from (for example `chatgpt.com,claude.ai`). Confirm the exact hosts in Pocket ID's log on the first connect.
+8. **Grocery**: set `GROCERY_PUBLIC_HTTP=127.0.0.1:8796`, `GROCERY_PUBLIC_URL=https://grocery.example.com`, `GROCERY_OAUTH_ISSUER=https://id.example.com`, `GROCERY_OWNER_EMAIL` and `GROCERY_OAUTH_USERS`, then restart `grocery-http`. `https://grocery.example.com/.well-known/oauth-protected-resource/mcp` should name the issuer, and `https://grocery.example.com/mcp` without a token should answer 401.
+9. **Connect**: add `https://grocery.example.com/mcp` as a connector in ChatGPT or Claude and sign in with the passkey.
+
 ## HTTP mode
 
 With `GROCERY_HTTP=127.0.0.1:8791`, the server listens at `http://127.0.0.1:8791/mcp`:

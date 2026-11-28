@@ -70,7 +70,7 @@ Then open `http://localhost:8795/account`.
 
 ### Sign-in on a public URL
 
-For connectors that sign in with OAuth instead of a tunnel, set `GROCERY_PUBLIC_HTTP`, `GROCERY_PUBLIC_URL` and `GROCERY_OAUTH_ISSUER`, and put a reverse proxy with HTTPS in front of the listener. The issuer is an OpenID provider such as Pocket ID. The owner and the people listed in `GROCERY_OAUTH_USERS` can sign in, each with their own preferences, sharing the owner's store accounts. See [server/README.md](server/README.md#sign-in).
+For connectors that sign in with OAuth instead of a tunnel, set `GROCERY_PUBLIC_HTTP`, `GROCERY_PUBLIC_URL` and `GROCERY_OAUTH_ISSUER`, and put a reverse proxy with HTTPS in front of the listener. The issuer is an OpenID provider such as Pocket ID. The owner and the people listed in `GROCERY_OAUTH_USERS` can sign in, each with their own preferences, sharing the owner's store accounts. See [server/README.md](server/README.md#sign-in), and its [deployment checklist](server/README.md#deploying-sign-in) with the files in [`deploy/`](deploy/README.md). The `pocket-id` service in `compose.tunnel.yaml` runs Pocket ID under the `auth` profile.
 
 ## Credentials
 
@@ -239,9 +239,10 @@ docker compose up -d         # only for long-running services such as grocery-ht
 | `upstream/` | The pinned Rami Levy and Shufersal integrations, as git submodules |
 | [`assets/`](assets/README.md) | The server icon, as SVG and as a 256 px PNG for ChatGPT |
 | [`tunnel/`](tunnel/README.md) | Connecting ChatGPT through an OpenAI Secure MCP Tunnel, with no public URL |
+| [`deploy/`](deploy/README.md) | The nginx example for the public sign-in URL and Pocket ID |
 | `Dockerfile`, `compose.yaml` | Images and services for `grocery`, `rami-levy` and `shufersal` |
 | `.github/workflows/` | Tests, and multi-platform image publishing |
-| `compose.tunnel.yaml` | Optional `grocery-http` and `tunnel` services for ChatGPT |
+| `compose.tunnel.yaml` | Optional `grocery-http` and `tunnel` services for ChatGPT, and `pocket-id` under the `auth` profile |
 | `.env.example` | Every credential and setting, with placeholders |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md), [`SECURITY.md`](SECURITY.md) | Development setup and checks, and how to report vulnerabilities |
 

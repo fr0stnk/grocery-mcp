@@ -1,0 +1,82 @@
+# Reverse proxy for the public sign-in setup. Replace example.com with your
+# domain and copy to /etc/nginx/sites-available/, then link it into
+# sites-enabled. Certificates come from certbot (see deploy/README.md).
+
+# Grocery MCP: the OAuth-protected public listener (GROCERY_PUBLIC_HTTP=127.0.0.1:8796).
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+    server_name grocery.example.com;
+
+    ssl_certificate     /etc/letsencrypt/live/grocery.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/grocery.example.com/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
+    client_max_body_size 4m;
+
+    # Only the MCP endpoint, its protected-resource metadata and the health check are served.
+    location = /mcp {
+        proxy_pass http://127.0.0.1:8796;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        # MCP over Streamable HTTP may answer with an event stream; do not buffer or cut it short.
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 300s;
+    }
+
+    location ^~ /.well-known/oauth-protected-resource {
+        proxy_pass http://127.0.0.1:8796;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+
+    location = /health {
+        proxy_pass http://127.0.0.1:8796;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location / {
+        return 404;
+    }
+}
+
+# Pocket ID: the sign-in service (compose profile auth, 127.0.0.1:1411).
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+    server_name id.example.com;
+
+    ssl_certificate     /etc/letsencrypt/live/id.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/id.example.com/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
+    client_max_body_size 4m;
+
+    location / {
+        proxy_pass http://127.0.0.1:1411;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        # Pocket ID's documented buffer sizes; smaller ones fail with "upstream sent too big header".
+        proxy_buffer_size 256k;
+        proxy_buffers 4 512k;
+        proxy_busy_buffers_size 512k;
+    }
+}
+
+# Plain HTTP only redirects to HTTPS (certbot's HTTP-01 challenge is handled by its nginx plugin).
+server {
+    listen 80;
+    listen [::]:80;
+    server_name grocery.example.com id.example.com;
+    return 301 https://$host$request_uri;
+}
