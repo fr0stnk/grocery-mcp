@@ -237,6 +237,38 @@ test('GROC-046: sugar in a jar loses to the plain kilo', () => {
   assert.equal(bestCandidates([sugars[0]], 'סוכר בצנצנת')[0].unrequested, undefined, 'asked for');
 });
 
+test('GROC-046: plain white sugar bags beat a shared Golden Classic barcode in compare_basket', async () => {
+  const golden = { name: 'סוכר גולדן קלאסי', barcode: '7290001990148', price: 15.9 };
+  const jar = { name: 'סוכר לבן בצנצנת', barcode: '7290003643387', price: 12.9 };
+  const sugars = {
+    shufersal: [
+      { name: 'סוכר לבן', productId: 'P_7296073006176', barcode: '7296073006176', price: 5.5 },
+      { ...jar, productId: 'P_3643387' },
+      { ...golden, productId: 'P_1990148' },
+    ],
+    'rami-levy': [
+      { name: 'סוכר חום 1 ק"ג פרימיום', productId: '22990', price: 14.2 },
+      { ...jar, name: 'סוכר לבן צנצנת סוגת 1 ק"ג', productId: '2792' },
+      { name: 'סוכר דמררה קלאסי סוגת 1 ק"ג', productId: '2793', price: 13.1 },
+      { ...golden, name: 'סוכר גולדן קלאסי סוגת 1 ק"ג', productId: '10268' },
+      { name: 'סוכר לבן 1 ק"ג רמי לוי', productId: '351639', barcode: '7290113460607', price: 3.3 },
+    ],
+  };
+  const stores = Object.entries(sugars).map(([id, items]) => ({
+    id, label: id, search: { maxLimit: 20, run: async () => items.map((item) => ({
+      ...item, store: id, inStock: true, size: '1 kg', priceBasis: 'unit',
+    })) },
+  }));
+  const lookup = async (query) => {
+    const { items: [line] } = await compareBasket(stores, { items: [{ query, quantity: 1 }] }, { cache: new SearchCache() });
+    return [line.offers.shufersal?.productId, line.offers['rami-levy']?.productId, line.identical];
+  };
+
+  assert.deepEqual(await lookup('סוכר 1 ק״ג'), ['P_7296073006176', '351639', false]);
+  assert.deepEqual(await lookup('סוכר גולדן 1 ק״ג'), ['P_1990148', '10268', true]);
+  assert.deepEqual(await lookup('סוכר בצנצנת 1 ק״ג'), ['P_3643387', '2792', true]);
+});
+
 test('GROC-008: a flavoured bread loses to plain bread, and is flagged when it is all a store has', () => {
   const breads = [{ name: 'לחם מחמצת עגבניות', price: 20.9 }, { name: 'לחם מחמצת', price: 18.9 }];
   assert.deepEqual(bestCandidates(breads, 'לחם').map((x) => x.name), ['לחם מחמצת']);

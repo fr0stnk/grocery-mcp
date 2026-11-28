@@ -45,6 +45,9 @@ const VARIANT_WORDS = new Set([
   // Added flavours, which turn a plain product into a variant: "לחם מחמצת עגבניות" is tomato bread.
   'עגבניות', 'זיתים', 'שום', 'בצל', 'צימוקים', 'אגוזים', 'תמרים', 'קינמון', 'זעתר', 'פטריות',
 ]);
+// These words denote a sugar variety in sugar searches and can be part of names in other categories.
+const SUGAR_VARIANTS = new Set(['גולדן', 'דמררה', 'גולמי']);
+
 // The form a product comes in. A query naming one ("סנו ג'אוול מרסס") is not met by another form (plain bleach,
 // a toilet block for "גל ניקוי אסלה"); each group holds the spellings of one form.
 const FORM_GROUPS = [
@@ -163,7 +166,9 @@ export function scoreOf(item, terms, query) {
   const queryWords = wordsOf(query);
   const asked = new Set([...queryWords, ...queryWords.map(bareOf), ...queryWords.flatMap((w) => IMPLIES[bareOf(w)] ?? [])]);
   const head = terms.length > 0 && words.slice(0, 2).some((w) => wordMatches(terms[0], w));
-  const unrequested = words.filter((w) => inSet(VARIANT_WORDS, w) && !asked.has(w) && !asked.has(bareOf(w)));
+  const sugarQuery = terms[0]?.forms.includes('סוכר');
+  const unrequested = words.filter((w) =>
+    (inSet(VARIANT_WORDS, w) || (sugarQuery && inSet(SUGAR_VARIANTS, w))) && !asked.has(w) && !asked.has(bareOf(w)));
   const asksForPack = queryWords.some((w) => inSet(MULTIPACK_WORDS, w)) || MULTIPACK_RE.test(String(query));
   if (!asksForPack) {
     const pack = item.packCount > 1
